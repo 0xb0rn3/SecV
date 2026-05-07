@@ -2,9 +2,9 @@
 
 Complete reference of all SecV security modules.
 
-**Version:** 2.4.1  
-**Total Modules:** 7  
-**Categories:** network (3), mobile (2), web (1)
+**Version:** 2.4.2  
+**Total Modules:** 8  
+**Categories:** network (4), mobile (2), web (1), ctf (1)
 
 ---
 
@@ -125,6 +125,79 @@ Real-time host discovery via ARP (scapy) with TCP-ping fallback, async per-host 
 sudo secV
 secV ❯ use wifi_monitor
 secV (wifi_monitor) ❯ run 192.168.1.0/24
+```
+
+---
+
+### `adsec` v1.0.0
+**Active Directory Security Assessment**
+
+Single-tool, full-chain Active Directory pentest covering everything from unauthenticated discovery through Kerberoasting, AS-REP roasting, lockout-aware password spraying, BloodHound collection, vuln checks (Zerologon, PetitPotam, NoPac, MachineAccountQuota, ADCS web enrollment), share looting (GPP cpassword, KeePass, SSH keys, unattend.xml), and SAM/LSA/NTDS extraction. Pure-Python fallback via `impacket` + `ldap3` means it works without dozens of external CLIs.
+
+**Operations:**
+
+| Operation | Auth Required | What it does |
+|-----------|---------------|--------------|
+| `discover` | none | DC fingerprint, domain SID, OS, NetBIOS, anonymous SMB/LDAP probing |
+| `users` | none / low-priv | LDAP user enum + SAMR RID brute fallback |
+| `groups` | low-priv | Domain group enumeration with members |
+| `shares` | none / low-priv | Share inventory with READ/WRITE permission tests |
+| `passpol` | none | Domain password policy via SAMR |
+| `kerberoast` | low-priv | TGS hash dump for SPN-bearing accounts |
+| `asreproast` | none | AS-REP hash dump for users without preauth |
+| `spray` | userlist | Lockout-aware password spraying via SMB |
+| `vulncheck` | none | Zerologon, PetitPotam, NoPac, MAQ, SMBv1, signing, ADCS |
+| `bloodhound` | low-priv | BloodHound JSON zip via bloodhound-python |
+| `loot` | low-priv | Sensitive file search across readable shares |
+| `secrets` | DA / local-admin | secretsdump SAM/LSA/NTDS via impacket |
+| `auto` | varies | Full safe pipeline with given context |
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `operation` | string | `discover` | One of the 13 operations above |
+| `domain` | string | — | AD domain FQDN (e.g. `corp.local`) |
+| `username` | string | — | Domain account for authenticated ops |
+| `password` | string | — | Domain password |
+| `hash` | string | — | NTLM hash (`LM:NT` or just `NT`) for pass-the-hash |
+| `kerberos` | boolean | `false` | Use Kerberos auth instead of NTLM |
+| `dc_ip` | string | — | DC IP if different from target |
+| `userlist` | string | — | Path to user list (asreproast, spray) |
+| `passlist` | string | — | Path to password list (spray) |
+| `single_password` | string | — | Single password to spray across users |
+| `safe_spray` | boolean | `true` | Lockout-aware (pulls passpol first) |
+| `bloodhound_collection` | string | `Default` | `Default`, `All`, `DCOnly`, `ACL`, `Trusts` |
+| `output_dir` | string | `./adsec-loot` | Where hashes, BH zips, and loot are saved |
+| `rid_max` | integer | `4000` | Max RID for SAMR brute |
+| `exclude_users` | string | — | Comma-separated usernames to skip in spray |
+| `threads` | integer | `20` | Concurrent workers |
+| `timeout` | integer | `30` | Per-op timeout (seconds) |
+
+**Safety:**
+- Lockout-aware spray pulls password policy first, leaves 2-attempt buffer
+- `krbtgt`, `Administrator`, `Guest` excluded from spray by default
+- All hashes written to `output_dir` (never logged to stdout)
+- Pure-Python fallbacks via `impacket` + `ldap3`
+
+**Quick Start:**
+```
+secV ❯ use adsec
+secV (adsec) ❯ set operation discover
+secV (adsec) ❯ run 192.168.1.50
+
+# AS-REP roast (no creds needed):
+secV (adsec) ❯ set operation asreproast
+secV (adsec) ❯ set domain corp.local
+secV (adsec) ❯ set userlist /tmp/users.txt
+secV (adsec) ❯ run 192.168.1.50
+
+# Full safe pipeline with low-priv creds:
+secV (adsec) ❯ set operation auto
+secV (adsec) ❯ set domain corp.local
+secV (adsec) ❯ set username analyst
+secV (adsec) ❯ set password 'P@ss123'
+secV (adsec) ❯ run 192.168.1.50
 ```
 
 ---

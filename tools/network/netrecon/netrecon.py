@@ -101,6 +101,18 @@ except ImportError:
     _mmh3 = None  # type: ignore
     CAPS['mmh3'] = False
 
+try:
+    import ldap3 as _ldap3_mod
+    CAPS['ldap3'] = True
+except ImportError:
+    CAPS['ldap3'] = False
+
+try:
+    import impacket as _impacket_mod
+    CAPS['impacket'] = True
+except ImportError:
+    CAPS['impacket'] = False
+
 # ============================================================================
 # OUI VENDOR DATABASE
 # ============================================================================
@@ -499,7 +511,7 @@ class HostProfile:
     os_version: str = ''
     os_confidence: int = 0
     device_type: str = ''
-    device_category: str = ''  # camera | router | nas | iot | ics | surveillance | unknown
+    device_category: str = ''  # camera | router | nas | iot | ics | surveillance | domain_controller | unknown
     ttl: int = 0
     latency_ms: float = 0.0
     services: List[ServiceInfo] = field(default_factory=list)
@@ -515,6 +527,7 @@ class HostProfile:
     risk_score: int = 0
     risk_level: str = 'LOW'
     scan_sources: List[str] = field(default_factory=list)
+    ad_info: Dict = field(default_factory=dict)
 
 # ============================================================================
 # NMAP RUNNER
@@ -626,6 +639,7 @@ class NmapRunner:
             'ics':      '80,443,502,20000,102,47808,1911,161,22',
             'device':   '80,443,554,1883,8883,5683,5353,8000,8080,8443,37777,34567,3702,7547,8291,5000,5001,9000,502,20000,102,47808,1911',
             'all':      '1-65535',
+            'ad':       '53,88,135,139,389,445,464,593,636,3268,3269,3389,5985,5986,49152-49155',
         }
         return presets.get(ports, ports)
 
@@ -1081,6 +1095,104 @@ def snmp_probe(ip: str, communities: Optional[List[str]] = None,
                 if m:
                     result['sysdescr'] = m.group(1).strip()[:200]
                 break
+        except Exception:
+            pass
+    return result
+
+
+# ============================================================================
+# ACTIVE DIRECTORY PROBES
+# ============================================================================
+
+_AD_PORTS = frozenset({88, 389, 445, 464, 593, 636, 3268, 3269})
+_DC_SIGNATURE_PORTS = frozenset({88, 389, 445})  # all three → almost certainly a DC
+
+
+def ldap_rootdse_probe(ip: str, timeout: int = 5) -> Dict:
+    """Anonymous LDAP bind to fetch rootDSE — identifies domain name, DC hostname, forest, FL."""
+    result: Dict = {}
+    if CAPS['ldap3']:
+        try:
+            from ldap3 import Server, Connection, ALL, ANONYMOUS
+            srv = _ldap3_mod.Server(ip, port=389, get_info=ALL, connect_timeout=timeout)
+            conn = _ldap3_mod.Connection(srv, authentication=ANONYMOUS, auto_bind=True,
+                                          receive_timeout=timeout)
+            info = srv.info
+            if info:
+                def _first(attr):
+                    v = getattr(info, attr, None)
+                    if v is None:
+                        return ''
+                    if isinstance(v, (list, tuple)):
+                        return str(v[0]) if v else ''
+                    return str(v)
+                result['domain']             = _first('other').get('defaultNamingContext', [''])[0] if hasattr(info, 'other') and info.other else _first('naming_contexts')
+                result['dns_host_name']      = (_first('other') or {}).get('dNSHostName', [''])[0] if hasattr(info, 'other') and info.other else ''
+                result['domain_func_level']  = (_first('other') or {}).get('domainFunctionality', [''])[0] if hasattr(info, 'other') and info.other else ''
+                result['forest_func_level']  = (_first('other') or {}).get('forestFunctionality', [''])[0] if hasattr(info, 'other') and info.other else ''
+                result['schema_naming_ctx']  = (_first('other') or {}).get('schemaNamingContext', [''])[0] if hasattr(info, 'other') and info.other else ''
+                result['server_name']        = (_first('other') or {}).get('ldapServiceName', [''])[0] if hasattr(info, 'other') and info.other else ''
+                result['naming_contexts']    = [str(nc) for nc in (info.naming_contexts or [])]
+                # Cleaner domain from defaultNamingContext DC=corp,DC=local → corp.local
+                nc = result.get('naming_contexts', [''])
+                if nc:
+                    dc_parts = re.findall(r'DC=([^,]+)', nc[0], re.IGNORECASE)
+                    if dc_parts:
+                        result['domain'] = '.'.join(dc_parts)
+            conn.unbind()
+        except Exception as e:
+            result['error'] = str(e)
+    elif CAPS['ldapsearch']:
+        try:
+            out = subprocess.run(
+                ['ldapsearch', '-x', '-H', f'ldap://{ip}', '-s', 'base', '-b', '',
+                 'defaultNamingContext', 'dNSHostName', 'domainFunctionality', 'ldapServiceName'],
+                capture_output=True, text=True, timeout=timeout
+            )
+            for line in out.stdout.splitlines():
+                if ':' in line and not line.startswith('#'):
+                    k, _, v = line.partition(':')
+                    result[k.strip()] = v.strip()
+            if result:
+                nc = result.get('defaultNamingContext', '')
+                dc_parts = re.findall(r'DC=([^,]+)', nc, re.IGNORECASE)
+                if dc_parts:
+                    result['domain'] = '.'.join(dc_parts)
+        except Exception as e:
+            result['error'] = str(e)
+    return result
+
+
+def smb_ad_probe(ip: str, timeout: int = 5) -> Dict:
+    """SMB dialect + signing + OS + NetBIOS name via impacket or smbclient."""
+    result: Dict = {}
+    if CAPS['impacket']:
+        try:
+            from impacket.smbconnection import SMBConnection
+            smb = SMBConnection(ip, ip, sess_port=445, timeout=timeout)
+            smb.negotiateSession()
+            result['smb_dialect']      = smb.getDialect()
+            result['smb_signing']      = smb.isSigningRequired()
+            result['server_name']      = smb.getServerName()
+            result['server_domain']    = smb.getServerDomain()
+            result['server_os']        = smb.getServerOS()
+            result['server_lanman']    = smb.getServerLanManBoth()
+            smb.logoff()
+        except Exception as e:
+            result['smb_error'] = str(e)
+    elif CAPS['smbclient']:
+        try:
+            out = subprocess.run(
+                ['smbclient', '-N', '-L', f'//{ip}', '--option=client min protocol=NT1'],
+                capture_output=True, text=True, timeout=timeout
+            )
+            for line in out.stdout.splitlines() + out.stderr.splitlines():
+                if 'Domain=' in line or 'OS=' in line:
+                    for part in line.split():
+                        if part.startswith('Domain='):
+                            result['server_domain'] = part[7:].strip('][]"')
+                        elif part.startswith('OS='):
+                            result['server_os'] = part[3:].strip('][]"')
         except Exception:
             pass
     return result
@@ -1713,6 +1825,11 @@ class NetRecon:
             self.scripts = True
             self.os_det  = True
             self.web_enum = True
+        if 'ad' in self.modes:
+            if 'ports' not in self.params:
+                self.ports = 'ad'
+            self.os_det = True
+            self.scripts = True
 
         self.shodan  = ShodanClient(self.shodan_key)
         self.errors: List[str] = []
@@ -1984,6 +2101,24 @@ class NetRecon:
                                 svc.http_technologies.append(tech)
                         if 'whatweb' not in svc.sources:
                             svc.sources.append('whatweb')
+
+        # AD probes — run when DC signature ports are open
+        if _DC_SIGNATURE_PORTS.issubset(open_ports) and not self.passive:
+            ad_result: Dict = {}
+            if tcp_open(ip, 389, 3.0):
+                ldap_data = ldap_rootdse_probe(ip, timeout=8)
+                if ldap_data:
+                    ad_result.update(ldap_data)
+            smb_data = smb_ad_probe(ip, timeout=8)
+            if smb_data:
+                ad_result.update(smb_data)
+            if ad_result:
+                profile.ad_info = ad_result
+                # Tag LDAP service with domain info
+                ldap_svc = next((s for s in profile.services if s.port in (389, 636)), None)
+                if ldap_svc and ad_result.get('domain'):
+                    if not ldap_svc.banner:
+                        ldap_svc.banner = ad_result['domain']
 
         # Banner grab fallback if nmap gave nothing
         if not profile.services and initial_ports and not self.passive:
@@ -2311,6 +2446,31 @@ class NetRecon:
     def _detect_device_category(self, profile: HostProfile):
         """Classify host into device category based on open ports and HTTP signatures"""
         open_ports = {s.port for s in profile.services}
+
+        # Domain Controller — Kerberos(88) + LDAP(389) + SMB(445) together = DC
+        if _DC_SIGNATURE_PORTS.issubset(open_ports):
+            profile.device_category = 'domain_controller'
+            ad = profile.ad_info or {}
+            domain  = ad.get('domain', '')
+            dc_host = ad.get('dns_host_name') or ad.get('server_name', '')
+            signing = ad.get('smb_signing', '')
+            desc = 'Active Directory Domain Controller detected'
+            if domain:
+                desc += f' — {domain}'
+            profile.vulnerabilities.append({
+                'id': 'AD-DC-DETECTED',
+                'severity': 'INFO',
+                'desc': desc,
+            })
+            if signing is False:
+                profile.vulnerabilities.append({
+                    'id': 'AD-SMB-SIGNING-NOT-REQUIRED',
+                    'severity': 'HIGH',
+                    'desc': 'SMB signing not required — NTLM relay attacks possible (PetitPotam, PrinterBug)',
+                })
+            if not profile.device_type and dc_host:
+                profile.device_type = f'DC: {dc_host}'
+            return
 
         # ICS/SCADA — highest priority, always flag critical
         ics_hit = open_ports & _ICS_PORTS
@@ -2922,7 +3082,16 @@ def _fmt_host_line(h: dict) -> str:
     id_s = '  '.join(filter(None, [mac, vnd or dt]))
     id_s = f'  {_DM}{id_s}{_R}' if id_s else ''
     rl   = _risk_tag(h.get('risk_level','LOW'), h.get('risk_score', 0))
-    return f'  {ip}{os_s}{hn_s}{id_s}  {rl}'
+    line = f'  {ip}{os_s}{hn_s}{id_s}  {rl}'
+    if h.get('device_category') == 'domain_controller':
+        ad   = h.get('ad_info') or {}
+        dom  = ad.get('domain', '')
+        dch  = ad.get('dns_host_name') or ad.get('server_name', '')
+        fl   = ad.get('domain_func_level', '')
+        tag  = f'{_RD}{_B}[DC]{_R}'
+        extra = '  '.join(filter(None, [dom, dch, f'FL:{fl}' if fl else '']))
+        line += f'  {tag}  {_YL}{extra}{_R}' if extra else f'  {tag}'
+    return line
 
 def _fmt_service(svc: dict, indent: str = '    ') -> List[str]:
     lines = []

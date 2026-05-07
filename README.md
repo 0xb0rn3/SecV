@@ -10,12 +10,12 @@
    ╚══════╝╚══════╝ ╚═════╝  ╚═══╝                               
 
 ```
-### tauri v2.4.1
+### tauri v2.4.2
 
 `Go` · `Python` · `Bash` · `Rust` · `C++` — one shell, any language
 ---
 
-[![Version](https://img.shields.io/badge/v2.4.1-tauri-0d1117?style=flat-square&labelColor=00d9ff&color=0d1117)](https://github.com/SecVulnHub/SecV)
+[![Version](https://img.shields.io/badge/v2.4.2-tauri-0d1117?style=flat-square&labelColor=00d9ff&color=0d1117)](https://github.com/SecVulnHub/SecV)
 [![License](https://img.shields.io/badge/MIT-license-0d1117?style=flat-square&labelColor=8b5cf6&color=0d1117)](LICENSE)
 [![Go](https://img.shields.io/badge/Go_1.21+-required-0d1117?style=flat-square&labelColor=00ADD8&color=0d1117)](https://golang.org/)
 [![Platform](https://img.shields.io/badge/Linux%20%7C%20macOS-0d1117?style=flat-square&labelColor=3a3f4b&color=0d1117)](#)
@@ -69,6 +69,7 @@ pip3 install requests beautifulsoup4 dnspython scapy psutil netifaces frida-tool
 | `websec` | `ffuf`⁴, `gobuster`, `msfvenom` (for msf_payload), `tor` (optional) | `requests`, `beautifulsoup4`, `dnspython` |
 | `mac_spoof` | `iproute2` (pre-installed on most distros) | `psutil`, `netifaces` |
 | `wifi_monitor` | `nmap` | `scapy`, `psutil` |
+| `adsec` | `nmap`, `smbclient`, `rpcclient` | `impacket`, `ldap3`, `dnspython` |
 | `ios_pentest` | `libimobiledevice`, `ideviceinstaller` | `requests` |
 
 ¹ rustscan: `cargo install rustscan` — or grab a binary from [GitHub releases](https://github.com/RustScan/RustScan/releases)
@@ -477,6 +478,49 @@ sudo secV
 use wifi_monitor
 run 192.168.1.0/24
 ```
+
+---
+
+### `adsec` — Active Directory Security Assessment
+
+Single-tool, full-chain AD pentest: unauthenticated discovery, user/group/share/passpol enumeration, Kerberoasting, AS-REP roasting, lockout-aware password spraying, BloodHound collection, vuln checks (Zerologon, PetitPotam, NoPac, MachineAccountQuota, ADCS), share looting (GPP cpassword, KeePass, SSH keys, unattend.xml), and SAM/LSA/NTDS extraction. Pure-Python fallbacks via `impacket` + `ldap3` mean it works without dozens of external CLIs.
+
+| Operation     | Auth required           | What it does                                                          |
+|---------------|-------------------------|-----------------------------------------------------------------------|
+| `discover`    | none                    | DC fingerprint, domain SID, OS, NetBIOS, anonymous SMB/LDAP probing  |
+| `users`       | none / low-priv         | LDAP user enum + SAMR RID brute fallback                              |
+| `groups`      | low-priv                | Domain group enumeration with members                                 |
+| `shares`      | none / low-priv         | Share inventory with READ/WRITE permission tests                      |
+| `passpol`     | none                    | Domain password policy via SAMR                                       |
+| `kerberoast`  | low-priv                | TGS hash dump for SPN-bearing accounts (hashcat -m 13100)             |
+| `asreproast`  | none (just userlist)    | AS-REP hash dump for users without preauth (hashcat -m 18200)         |
+| `spray`       | userlist                | Lockout-aware password spraying via SMB                               |
+| `vulncheck`   | none                    | Zerologon, PetitPotam, NoPac, MAQ, SMBv1, SMB signing, ADCS detection |
+| `bloodhound`  | low-priv                | BloodHound JSON zip via bloodhound-python                             |
+| `loot`        | low-priv                | Sensitive file search across readable shares                          |
+| `secrets`     | DA / local-admin        | secretsdump SAM/LSA/NTDS via impacket                                 |
+| `auto`        | varies                  | Full safe pipeline with whatever context is available                 |
+
+```bash
+secV ❯ use adsec
+secV (adsec) ❯ set operation discover
+secV (adsec) ❯ run 192.168.1.50
+
+# AS-REP roast — no creds, just a userlist:
+secV (adsec) ❯ set operation asreproast
+secV (adsec) ❯ set domain corp.local
+secV (adsec) ❯ set userlist /tmp/users.txt
+secV (adsec) ❯ run 192.168.1.50
+
+# Pass-the-hash NTDS dump (DA required):
+secV (adsec) ❯ set operation secrets
+secV (adsec) ❯ set domain corp.local
+secV (adsec) ❯ set username admin
+secV (adsec) ❯ set hash aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0
+secV (adsec) ❯ run 192.168.1.50
+```
+
+Lockout safety is on by default — `safe_spray=true` pulls password policy first and leaves a 2-attempt buffer below the lockout threshold. `krbtgt`, `Administrator`, and `Guest` are excluded from sprays automatically. All hashes go to `output_dir` (default `./adsec-loot`) and are never logged to stdout.
 
 ---
 
