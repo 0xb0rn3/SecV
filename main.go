@@ -71,7 +71,7 @@ func detectDistro() distroInfo {
 	}
 
 	switch info.id {
-	case "arch", "archcraft", "manjaro", "endeavouros", "cachyos":
+	case "arch", "archcraft", "manjaro", "endeavouros", "cachyos", "artix", "garuda":
 		info.pkgMgr = "pacman"
 		for _, aur := range []string{"yay", "paru", "trizen"} {
 			if path, _ := exec.LookPath(aur); path != "" {
@@ -79,18 +79,20 @@ func detectDistro() distroInfo {
 				break
 			}
 		}
-	case "ubuntu", "debian", "kali", "parrot", "linuxmint", "pop":
+	case "ubuntu", "debian", "kali", "parrot", "linuxmint", "pop", "elementary", "zorin", "mx":
 		info.pkgMgr = "apt"
-	case "fedora":
+	case "fedora", "nobara":
 		info.pkgMgr = "dnf"
-	case "rhel", "centos", "rocky", "alma":
+	case "rhel", "centos", "rocky", "alma", "oracle":
 		info.pkgMgr = "dnf"
-	case "opensuse-leap", "opensuse-tumbleweed", "sles":
+	case "opensuse-leap", "opensuse-tumbleweed", "sles", "opensuse":
 		info.pkgMgr = "zypper"
 	case "alpine":
 		info.pkgMgr = "apk"
 	case "void":
 		info.pkgMgr = "xbps-install"
+	case "gentoo":
+		info.pkgMgr = "emerge"
 	default:
 		if runtime.GOOS == "darwin" {
 			info.pkgMgr = "brew"
@@ -120,6 +122,8 @@ func installPackage(pkg string, d distroInfo) error {
 		cmd = exec.Command("sudo", "apk", "add", pkg)
 	case "xbps-install":
 		cmd = exec.Command("sudo", "xbps-install", "-Sy", pkg)
+	case "emerge":
+		cmd = exec.Command("sudo", "emerge", "--ask=n", pkg)
 	case "brew":
 		cmd = exec.Command("brew", "install", pkg)
 	default:
@@ -134,26 +138,39 @@ func installPackage(pkg string, d distroInfo) error {
 // correct system package name for each package manager. Binary name = what
 // exec.LookPath checks; package name = what pacman/apt/dnf installs.
 var binToPackage = map[string]map[string]string{
-	// binary      pkgmgr   package
-	"adb":         {"pacman": "android-tools", "apt": "adb",         "dnf": "android-tools",   "brew": "android-platform-tools"},
-	"fastboot":    {"pacman": "android-tools", "apt": "fastboot",    "dnf": "android-tools"},
-	"nmap":        {"pacman": "nmap",          "apt": "nmap",        "dnf": "nmap",             "brew": "nmap"},
-	"masscan":     {"pacman": "masscan",       "apt": "masscan",     "dnf": "masscan"},
-	"rustscan":    {"pacman": "rustscan",      "apt": "rustscan",    "brew": "rustscan"},
-	"tcpdump":     {"pacman": "tcpdump",       "apt": "tcpdump",     "dnf": "tcpdump",          "brew": "tcpdump"},
-	"wireshark":   {"pacman": "wireshark-qt",  "apt": "wireshark",   "dnf": "wireshark"},
-	"apktool":     {"pacman": "apktool",       "apt": "apktool",     "brew": "apktool"},
-	"jadx":        {"pacman": "jadx",          "apt": "jadx"},
-	"aapt":        {"pacman": "aapt",          "apt": "aapt"},
-	"ideviceinfo": {"pacman": "libimobiledevice", "apt": "libimobiledevice-utils", "dnf": "libimobiledevice-utils", "brew": "libimobiledevice"},
-	"ideviceinstaller": {"pacman": "ideviceinstaller", "apt": "ideviceinstaller", "brew": "ideviceinstaller"},
-	"python3":     {"pacman": "python",        "apt": "python3",     "dnf": "python3",          "brew": "python@3"},
-	"jq":          {"pacman": "jq",            "apt": "jq",          "dnf": "jq",               "brew": "jq"},
-	"curl":        {"pacman": "curl",          "apt": "curl",        "dnf": "curl",             "brew": "curl"},
-	"git":         {"pacman": "git",           "apt": "git",         "dnf": "git",              "brew": "git"},
-	"go":          {"pacman": "go",            "apt": "golang",      "dnf": "golang",           "brew": "go"},
-	"avahi-browse":{"pacman": "avahi",         "apt": "avahi-utils", "dnf": "avahi-tools"},
-	"arp-scan":    {"pacman": "arp-scan",      "apt": "arp-scan",    "dnf": "arp-scan"},
+	// binary              pacman                   apt                          dnf                    zypper              apk                  brew
+	"adb":           {"pacman": "android-tools", "apt": "adb",                "dnf": "android-tools",                                          "brew": "android-platform-tools"},
+	"fastboot":      {"pacman": "android-tools", "apt": "fastboot",           "dnf": "android-tools"},
+	"nmap":          {"pacman": "nmap",          "apt": "nmap",               "dnf": "nmap",          "zypper": "nmap",    "apk": "nmap",       "brew": "nmap"},
+	"masscan":       {"pacman": "masscan",       "apt": "masscan",            "dnf": "masscan"},
+	"rustscan":      {"pacman": "rustscan",      "apt": "rustscan",                                                                             "brew": "rustscan"},
+	"tcpdump":       {"pacman": "tcpdump",       "apt": "tcpdump",            "dnf": "tcpdump",       "zypper": "tcpdump", "apk": "tcpdump",    "brew": "tcpdump"},
+	"wireshark":     {"pacman": "wireshark-qt",  "apt": "wireshark",          "dnf": "wireshark"},
+	"apktool":       {"pacman": "apktool",       "apt": "apktool",                                                                             "brew": "apktool"},
+	"jadx":          {"pacman": "jadx",          "apt": "jadx"},
+	"aapt":          {"pacman": "aapt",          "apt": "aapt"},
+	"ideviceinfo":   {"pacman": "libimobiledevice", "apt": "libimobiledevice-utils", "dnf": "libimobiledevice-utils",                         "brew": "libimobiledevice"},
+	"ideviceinstaller": {"pacman": "ideviceinstaller", "apt": "ideviceinstaller",                                                             "brew": "ideviceinstaller"},
+	"python3":       {"pacman": "python",        "apt": "python3",            "dnf": "python3",       "zypper": "python3", "apk": "python3",   "brew": "python@3"},
+	"jq":            {"pacman": "jq",            "apt": "jq",                 "dnf": "jq",            "zypper": "jq",      "apk": "jq",        "brew": "jq"},
+	"curl":          {"pacman": "curl",          "apt": "curl",               "dnf": "curl",          "zypper": "curl",    "apk": "curl",      "brew": "curl"},
+	"wget":          {"pacman": "wget",          "apt": "wget",               "dnf": "wget",          "zypper": "wget",    "apk": "wget",      "brew": "wget"},
+	"git":           {"pacman": "git",           "apt": "git",                "dnf": "git",           "zypper": "git",     "apk": "git",       "brew": "git"},
+	"go":            {"pacman": "go",            "apt": "golang-go",          "dnf": "golang",        "zypper": "go",      "apk": "go",        "brew": "go"},
+	"avahi-browse":  {"pacman": "avahi",         "apt": "avahi-utils",        "dnf": "avahi-tools"},
+	"arp-scan":      {"pacman": "arp-scan",      "apt": "arp-scan",           "dnf": "arp-scan"},
+	"smbclient":     {"pacman": "smbclient",     "apt": "smbclient",          "dnf": "samba-client",  "zypper": "samba-client", "apk": "samba-client"},
+	"rpcclient":     {"pacman": "smbclient",     "apt": "smbclient",          "dnf": "samba-client"},
+	"xorriso":       {"pacman": "xorriso",       "apt": "xorriso",            "dnf": "xorriso",       "zypper": "xorriso"},
+	"hashcat":       {"pacman": "hashcat",       "apt": "hashcat",            "dnf": "hashcat",                                                "brew": "hashcat"},
+	"john":          {"pacman": "john",          "apt": "john",               "dnf": "john"},
+	"nc":            {"pacman": "nmap-ncat",     "apt": "netcat-traditional", "dnf": "nmap-ncat",                          "apk": "netcat-openbsd"},
+	"ncat":          {"pacman": "nmap-ncat",     "apt": "ncat",               "dnf": "nmap-ncat"},
+	"ssh":           {"pacman": "openssh",       "apt": "openssh-client",     "dnf": "openssh-clients", "zypper": "openssh", "apk": "openssh-client", "brew": "openssh"},
+	"ip":            {"pacman": "iproute2",      "apt": "iproute2",           "dnf": "iproute",       "zypper": "iproute2", "apk": "iproute2"},
+	"whois":         {"pacman": "whois",         "apt": "whois",              "dnf": "whois",         "zypper": "whois",   "apk": "whois",     "brew": "whois"},
+	"msfconsole":    {"pacman": "metasploit",    "apt": "metasploit-framework"},
+	"msfvenom":      {"pacman": "metasploit",    "apt": "metasploit-framework"},
 }
 
 // resolvePackageName returns the correct package name for installing a given
@@ -220,6 +237,8 @@ type Module struct {
 	Help         *ModuleHelp            `json:"help"`
 	Inputs       map[string]interface{} `json:"inputs"`
 	Outputs      map[string]interface{} `json:"outputs"`
+	Operations   map[string]string      `json:"operations"`
+	Concurrent   bool                   `json:"concurrent"`
 	Timeout      int                    `json:"timeout"`
 	Path         string                 `json:"-"`
 }
@@ -588,6 +607,9 @@ func (s *SecV) ShowModules() {
 					opCount = fmt.Sprintf("%d", len(opParam.Options))
 				}
 			}
+			if opCount == "—" && len(m.Operations) > 0 {
+				opCount = fmt.Sprintf("%d", len(m.Operations))
+			}
 			fmt.Printf("  %s%-20s%s %s%-9s%s %-5s %s%s%s\n",
 				CYAN, m.Name, RESET,
 				DIM, ver, RESET,
@@ -658,26 +680,56 @@ func (s *SecV) ShowOptions() {
 		}
 	} else if len(m.Inputs) > 0 {
 		printSection("inputs")
-		for name, info := range m.Inputs {
+		fmt.Printf("  %s%-24s %-10s %-5s %-14s %s%s\n", BOLD, "PARAM", "TYPE", "REQ", "CURRENT/DEFAULT", "DESCRIPTION", RESET)
+		fmt.Printf("  %s%s%s\n", DIM, strings.Repeat("─", 72), RESET)
+		// Sort for stable display
+		keys := make([]string, 0, len(m.Inputs))
+		for k := range m.Inputs {
+			keys = append(keys, k)
+		}
+		for i := 0; i < len(keys)-1; i++ {
+			for j := i + 1; j < len(keys); j++ {
+				if keys[i] > keys[j] {
+					keys[i], keys[j] = keys[j], keys[i]
+				}
+			}
+		}
+		for _, name := range keys {
+			info := m.Inputs[name]
 			inf, ok := info.(map[string]interface{})
 			if !ok {
 				continue
 			}
 			ptype, _ := inf["type"].(string)
-			desc, _ := inf["description"].(string)
-			req := ""
+			reqStr := "no"
+			reqCol := DIM
 			if r, _ := inf["required"].(bool); r {
-				req = fmt.Sprintf(" %s*%s", RED, RESET)
+				reqStr = "YES"
+				reqCol = RED
 			}
 			val, isSet := s.params[name]
-			valStr := fmt.Sprintf("%snot set%s", DIM, RESET)
+			var valStr string
 			if isSet {
-				valStr = fmt.Sprintf("%s%s%s", CYAN, val, RESET)
+				v := val
+				if len(v) > 20 {
+					v = v[:17] + "..."
+				}
+				valStr = fmt.Sprintf("%s%s%s", CYAN, v, RESET)
+			} else if dv, ok := inf["default"]; ok && dv != nil {
+				dvs := fmt.Sprintf("%v", dv)
+				if dvs != "" && dvs != "false" && dvs != "<nil>" {
+					if len(dvs) > 14 {
+						dvs = dvs[:11] + "..."
+					}
+					valStr = fmt.Sprintf("%s(default: %s)%s", DIM, dvs, RESET)
+				} else {
+					valStr = fmt.Sprintf("%snot set%s", DIM, RESET)
+				}
+			} else {
+				valStr = fmt.Sprintf("%snot set%s", DIM, RESET)
 			}
-			fmt.Printf("  %s%s%s%s  %s(%s)%s  →  %s\n", BOLD, name, req, RESET, DIM, ptype, RESET, valStr)
-			if desc != "" {
-				fmt.Printf("    %s%s%s\n", DIM, desc, RESET)
-			}
+			nameStr := fmt.Sprintf("%s%s%s", BOLD, name, RESET)
+			fmt.Printf("  %-32s %-10s %s%-5s%s %s\n", nameStr, ptype, reqCol, reqStr, RESET, valStr)
 		}
 	} else {
 		printSection("params set")
@@ -750,7 +802,7 @@ func (s *SecV) ShowInfo(moduleName string) {
 		fmt.Println()
 	}
 
-	// Operations (from help.parameters["operation"].options)
+	// Operations display — from help.parameters["operation"].options or module.json "operations" map
 	if m.Help != nil {
 		if opParam, ok := m.Help.Parameters["operation"]; ok && len(opParam.Options) > 0 {
 			printSection("operations")
@@ -765,7 +817,30 @@ func (s *SecV) ShowInfo(moduleName string) {
 				}
 			}
 		}
+	} else if len(m.Operations) > 0 {
+		printSection("operations")
+		ops := make([]string, 0, len(m.Operations))
+		for op := range m.Operations {
+			ops = append(ops, op)
+		}
+		for i := 0; i < len(ops)-1; i++ {
+			for j := i + 1; j < len(ops); j++ {
+				if ops[i] > ops[j] {
+					ops[i], ops[j] = ops[j], ops[i]
+				}
+			}
+		}
+		for _, op := range ops {
+			desc := m.Operations[op]
+			if len(desc) > 52 {
+				desc = desc[:49] + "..."
+			}
+			fmt.Printf("  %s%-24s%s %s%s%s\n", CYAN, op, RESET, DIM, desc, RESET)
+		}
+	}
 
+	// Help-driven display: parameters, examples, features, notes, tiers
+	if m.Help != nil {
 		// Full parameters table
 		if len(m.Help.Parameters) > 0 {
 			printSection("parameters")
@@ -773,7 +848,7 @@ func (s *SecV) ShowInfo(moduleName string) {
 			fmt.Printf("  %s%s%s\n", DIM, strings.Repeat("─", 80), RESET)
 			for pname, pi := range m.Help.Parameters {
 				if pname == "operation" {
-					continue // already shown above
+					continue
 				}
 				reqStr := "no"
 				reqCol := DIM
@@ -804,7 +879,7 @@ func (s *SecV) ShowInfo(moduleName string) {
 			}
 		}
 
-		// All examples
+		// Examples
 		if len(m.Help.Examples) > 0 {
 			printSection("examples")
 			for _, ex := range m.Help.Examples {
@@ -824,7 +899,7 @@ func (s *SecV) ShowInfo(moduleName string) {
 			}
 		}
 
-		// All notes
+		// Notes
 		if len(m.Help.Notes) > 0 {
 			printSection("notes")
 			for _, note := range m.Help.Notes {
@@ -832,8 +907,7 @@ func (s *SecV) ShowInfo(moduleName string) {
 			}
 		}
 
-		// Vulnerability coverage (if present in InstallationTiers as a proxy, or
-		// look for a "vulnerability_coverage" key in the raw help map)
+		// Vulnerability coverage / installation tiers
 		if len(m.Help.InstallationTiers) > 0 {
 			printSection("vulnerability coverage")
 			for tier, desc := range m.Help.InstallationTiers {
@@ -842,34 +916,49 @@ func (s *SecV) ShowInfo(moduleName string) {
 		}
 	}
 
-	// Inputs (from module.json inputs block)
-	if len(m.Inputs) > 0 {
+	// Inputs (from module.json inputs block — used by modules without a help section)
+	if len(m.Inputs) > 0 && m.Help == nil {
 		printSection("inputs")
-		fmt.Printf("  %s%-20s %-10s %-8s %s%s\n", BOLD, "PARAM", "TYPE", "REQUIRED", "DESCRIPTION", RESET)
-		fmt.Printf("  %s%s%s\n", DIM, strings.Repeat("─", 70), RESET)
-		for k, v := range m.Inputs {
+		fmt.Printf("  %s%-24s %-10s %-12s %s%s\n", BOLD, "PARAM", "TYPE", "DEFAULT", "DESCRIPTION", RESET)
+		fmt.Printf("  %s%s%s\n", DIM, strings.Repeat("─", 72), RESET)
+		// Sort param names for stable output
+		keys := make([]string, 0, len(m.Inputs))
+		for k := range m.Inputs {
+			keys = append(keys, k)
+		}
+		for i := 0; i < len(keys)-1; i++ {
+			for j := i + 1; j < len(keys); j++ {
+				if keys[i] > keys[j] {
+					keys[i], keys[j] = keys[j], keys[i]
+				}
+			}
+		}
+		for _, k := range keys {
+			v := m.Inputs[k]
 			if vm, ok := v.(map[string]interface{}); ok {
 				typ := fmt.Sprintf("%v", vm["type"])
-				desc := ""
-				if d, ok := vm["description"].(string); ok {
-					if len(d) > 40 {
-						d = d[:37] + "..."
-					}
-					desc = d
-				}
-				reqStr := "no"
+				reqStr := ""
 				reqCol := DIM
 				if r, _ := vm["required"].(bool); r {
-					reqStr = "YES"
+					reqStr = "*"
 					reqCol = RED
 				}
-				def := ""
-				if dv, ok := vm["default"]; ok && dv != nil && fmt.Sprintf("%v", dv) != "" && fmt.Sprintf("%v", dv) != "false" {
-					def = fmt.Sprintf(" %s(default: %v)%s", DIM, dv, RESET)
+				defStr := ""
+				if dv, ok := vm["default"]; ok && dv != nil {
+					dv_s := fmt.Sprintf("%v", dv)
+					if dv_s != "" && dv_s != "false" && dv_s != "<nil>" {
+						if len(dv_s) > 12 {
+							dv_s = dv_s[:9] + "..."
+						}
+						defStr = dv_s
+					}
 				}
-				nameStr := fmt.Sprintf("%s%s%s", CYAN, k, RESET)
-				fmt.Printf("  %-28s %-10s %s%-8s%s %s%s\n", nameStr, typ, reqCol, reqStr, RESET, desc, def)
+				nameStr := fmt.Sprintf("%s%s%s%s%s", CYAN, k, RESET, reqCol, reqStr)
+				fmt.Printf("  %-32s %-10s %-12s\n", nameStr+RESET, typ, defStr)
 			}
+		}
+		if m.Concurrent {
+			fmt.Printf("\n  %sconcurrent%s  parallel operations supported\n", DIM, RESET)
 		}
 	}
 
@@ -911,17 +1000,35 @@ func (s *SecV) ShowHelp(topic string) {
 			{"search <keyword>", "search modules by name/description"},
 			{"help module", "full help for the loaded module"},
 		}},
-		{"navigation", [][]string{
+		{"filesystem", [][]string{
 			{"cd <dir>", "change working directory"},
 			{"cd ..  /  cd ../", "go up one directory (or back from module)"},
 			{"pwd", "print current working directory"},
-			{"ls [path]", "list directory contents"},
-			{"mkdir <dir>", "create directory"},
-			{"mv <src> <dst>", "move / rename file"},
-			{"cp <src> <dst>", "copy file"},
-			{"rm <file>", "remove file"},
-			{"cat <file>", "print file contents"},
-			{"find / grep / chmod", "standard Linux commands — all pass through"},
+			{"ls / find / stat / file", "directory and file inspection"},
+			{"mkdir / mv / cp / rm", "file management"},
+			{"cat / head / tail / less", "file content"},
+			{"chmod / chown / ln", "permissions and links"},
+			{"tar / unzip / zip", "archives"},
+		}},
+		{"data", [][]string{
+			{"grep / egrep / rg", "search file contents"},
+			{"awk / sed / cut / sort", "text processing and extraction"},
+			{"jq", "parse JSON output from tools"},
+			{"base64 / xxd / strings", "encoding and binary inspection"},
+			{"tee / wc / uniq / diff", "output capture and comparison"},
+		}},
+		{"network", [][]string{
+			{"curl / wget", "HTTP requests and file download"},
+			{"ssh / scp", "remote access and file transfer"},
+			{"nc / ncat", "raw TCP/UDP connections"},
+			{"ip / ping", "interface and connectivity checks"},
+		}},
+		{"pentest", [][]string{
+			{"nmap <target>", "port scan — passthrough to system nmap"},
+			{"smbclient / rpcclient", "SMB and RPC queries"},
+			{"hashcat / john", "offline hash cracking"},
+			{"msfconsole / msfvenom", "Metasploit console and payload gen"},
+			{"nxc / netexec", "network exploitation framework"},
 		}},
 		{"system", [][]string{
 			{"sessions [list|interact|kill]", "manage Meterpreter sessions"},
@@ -942,7 +1049,7 @@ func (s *SecV) ShowHelp(topic string) {
 				strings.Repeat(" ", pad), c[1])
 		}
 	}
-	fmt.Printf("\n%stab completion active — press Tab | any Linux command works natively%s\n\n", DIM, RESET)
+	fmt.Printf("\n%stab completion active — press Tab | pentest tools (nmap, hashcat, nxc…) pass through%s\n\n", DIM, RESET)
 }
 
 func (s *SecV) ShowModuleHelp() {
@@ -1178,22 +1285,37 @@ func CAPS_HAS(tool string) bool {
 // ============================================================================
 
 var shellPassthroughCmds = map[string]bool{
-	"ls": true, "ll": true, "la": true, "dir": true,
-	"mkdir": true, "rmdir": true, "mv": true, "cp": true, "rm": true,
-	"cat": true, "less": true, "more": true, "head": true, "tail": true,
-	"echo": true, "touch": true, "pwd": true,
-	"find": true, "grep": true, "egrep": true, "rg": true,
-	"chmod": true, "chown": true, "ln": true,
-	"whoami": true, "id": true, "which": true, "whereis": true,
-	"file": true, "stat": true, "df": true, "du": true,
-	"ps": true, "kill": true, "killall": true,
+	// Filesystem
+	"ls": true, "mkdir": true, "rmdir": true, "mv": true, "cp": true, "rm": true,
+	"cat": true, "less": true, "head": true, "tail": true, "touch": true,
+	"find": true, "file": true, "stat": true, "ln": true,
+	// Text processing — essential for parsing tool output
+	"grep": true, "egrep": true, "rg": true,
+	"awk": true, "sed": true, "cut": true, "tee": true,
 	"sort": true, "wc": true, "uniq": true, "diff": true,
-	"tar": true, "gzip": true, "unzip": true,
+	"jq": true, "xargs": true, "strings": true,
+	// Encoding / conversion
+	"base64": true, "xxd": true,
+	// Archives
+	"tar": true, "unzip": true, "zip": true,
+	// File permissions / ownership
+	"chmod": true, "chown": true,
+	// Disk / process
+	"df": true, "du": true, "ps": true, "kill": true, "killall": true,
+	// Identity / path resolution
+	"whoami": true, "id": true, "which": true, "whereis": true,
+	// Network fetch
 	"curl": true, "wget": true,
-	"python3": true, "python": true, "bash": true, "sh": true,
-	"git": true, "nano": true, "vim": true, "vi": true,
-	"env": true, "export": true, "printenv": true,
-	"uname": true, "hostname": true, "uptime": true, "date": true,
+	// Network — useful for toolkit: quick connectivity checks, raw connections
+	"ssh": true, "scp": true, "ip": true, "nc": true, "ncat": true, "ping": true,
+	// Pentest tools — passthrough so operators can run them alongside modules
+	"nmap": true, "nxc": true, "netexec": true, "crackmapexec": true,
+	"smbclient": true, "rpcclient": true, "ldapsearch": true,
+	"kerbrute": true, "hashcat": true, "john": true,
+	"msfconsole": true, "msfvenom": true,
+	"python3": true, "git": true,
+	// Editors — useful for reviewing loot / editing configs mid-session
+	"vim": true, "vi": true, "nano": true,
 }
 
 func (s *SecV) execShellCmd(line string) {
@@ -1272,12 +1394,10 @@ func (s *SecV) buildCompleter() *readline.PrefixCompleter {
 		readline.PcItem("clear"),
 		readline.PcItem("exit"),
 		readline.PcItem("quit"),
-		// Linux navigation / filesystem
+		// Filesystem
 		readline.PcItem("cd"),
 		readline.PcItem("pwd"),
 		readline.PcItem("ls"),
-		readline.PcItem("ll"),
-		readline.PcItem("la"),
 		readline.PcItem("mkdir"),
 		readline.PcItem("rmdir"),
 		readline.PcItem("mv"),
@@ -1289,14 +1409,58 @@ func (s *SecV) buildCompleter() *readline.PrefixCompleter {
 		readline.PcItem("tail"),
 		readline.PcItem("find"),
 		readline.PcItem("grep"),
+		readline.PcItem("egrep"),
 		readline.PcItem("chmod"),
 		readline.PcItem("chown"),
 		readline.PcItem("touch"),
 		readline.PcItem("file"),
 		readline.PcItem("stat"),
+		readline.PcItem("ln"),
+		readline.PcItem("tar"),
+		readline.PcItem("unzip"),
+		readline.PcItem("zip"),
+		// Data processing
+		readline.PcItem("awk"),
+		readline.PcItem("sed"),
+		readline.PcItem("cut"),
+		readline.PcItem("jq"),
+		readline.PcItem("tee"),
+		readline.PcItem("sort"),
+		readline.PcItem("wc"),
+		readline.PcItem("base64"),
+		readline.PcItem("xxd"),
+		readline.PcItem("strings"),
+		// Identity / path
 		readline.PcItem("whoami"),
+		readline.PcItem("id"),
 		readline.PcItem("which"),
+		readline.PcItem("whereis"),
+		// Network
+		readline.PcItem("curl"),
+		readline.PcItem("wget"),
+		readline.PcItem("ssh"),
+		readline.PcItem("scp"),
+		readline.PcItem("nc"),
+		readline.PcItem("ncat"),
+		readline.PcItem("ip"),
+		readline.PcItem("ping"),
+		// Pentest tools
+		readline.PcItem("nmap"),
+		readline.PcItem("nxc"),
+		readline.PcItem("netexec"),
+		readline.PcItem("smbclient"),
+		readline.PcItem("rpcclient"),
+		readline.PcItem("hashcat"),
+		readline.PcItem("john"),
+		readline.PcItem("msfconsole"),
+		readline.PcItem("msfvenom"),
+		readline.PcItem("kerbrute"),
+		// Dev
+		readline.PcItem("python3"),
 		readline.PcItem("git"),
+		readline.PcItem("vim"),
+		readline.PcItem("vi"),
+		readline.PcItem("nano"),
 	}
 	return readline.NewPrefixCompleter(topCmds...)
 }

@@ -1,12 +1,20 @@
-# secV Requirements Manifest
-# Contributors: add your tool's dependencies in the appropriate section.
-# install.sh reads all rqm.md files in the repo tree and installs everything listed.
-# If a section is empty or the file does not exist, it is silently skipped.
+# secV Global Requirements Manifest
+# This is the ONE authoritative requirements file for ALL secV modules.
+# Modules covered: netrecon, mac_spoof, wifi_monitor, adsec, android_pentest,
+#                  ios_pentest, websec, webscan, ctfpwn, winadsec
+#
+# install.sh reads this file and installs everything listed.
+# If a section is empty or does not exist, it is silently skipped.
+# Per-module rqm.md files are DEPRECATED — all deps live here.
 #
 # Sections:
 #   #python   - pip packages (installed with pip3 --break-system-packages)
 #   #pacman   - Arch/Manjaro/CachyOS packages
 #   #apt      - Debian/Ubuntu/Kali packages
+#   #dnf      - Fedora/RHEL/Rocky packages
+#   #zypper   - openSUSE Leap/Tumbleweed packages
+#   #apk      - Alpine Linux packages
+#   #xbps     - Void Linux packages
 #   #binary   - name,url  (downloaded binary, checked by `command -v name`)
 
 #python
@@ -20,6 +28,14 @@ aiohttp>=3.9.0
 flask>=3.0.0
 qrcode[pil]>=8.0
 pillow>=10.0.0
+impacket>=0.12.0
+ldap3>=2.9.1
+dnspython>=2.4.0
+bloodhound>=1.7.0
+frida-tools>=12.5.0
+objection>=1.11.0
+beautifulsoup4>=4.12.0
+shodan>=1.31.0
 
 #pacman
 python
@@ -37,6 +53,11 @@ curl
 wget
 nmap-ncat
 go
+smbclient
+xorriso
+libimobiledevice
+ideviceinstaller
+python-pillow
 
 #apt
 python3
@@ -54,6 +75,76 @@ curl
 wget
 netcat-traditional
 golang-go
+smbclient
+rpcclient
+xorriso
+libimobiledevice-utils
+ideviceinstaller
+
+#dnf
+python3
+python3-pip
+nmap
+masscan
+whois
+iproute
+java-latest-openjdk
+android-tools
+git
+curl
+wget
+nmap-ncat
+golang
+samba-client
+xorriso
+
+#zypper
+python3
+python3-pip
+nmap
+masscan
+whois
+iproute2
+java-17-openjdk
+android-tools
+git
+curl
+wget
+ncat
+go
+samba-client
+xorriso
+
+#apk
+python3
+py3-pip
+nmap
+whois
+iproute2
+openjdk17-jre
+android-tools
+git
+curl
+wget
+nmap-ncat
+go
+samba-client
+
+#xbps
+python3
+python3-pip
+nmap
+masscan
+whois
+iproute2
+openjdk17-jre
+android-tools
+git
+curl
+wget
+go
+samba
+xorriso
 
 #binary
 bore,https://github.com/ekzhang/bore/releases/latest

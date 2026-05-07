@@ -1,85 +1,152 @@
 #!/usr/bin/env bash
-# secV installer
-# Reads all rqm.md files in the repo tree and installs listed dependencies.
-# Contributors add their tool's requirements to the rqm.md in their module directory.
+# secV v2.4.2 "tauri" installer
+# Reads the single global rqm.md at the repo root and installs all dependencies.
+# Supports: Arch/Manjaro/CachyOS (pacman), Debian/Ubuntu/Kali (apt),
+#           Fedora/RHEL/Rocky (dnf), openSUSE (zypper), Alpine (apk), Void (xbps-install)
 set -euo pipefail
 
 RED='\033[0;31m'; GRN='\033[0;32m'; YLW='\033[1;33m'; CYN='\033[0;36m'; RST='\033[0m'
 info()  { echo -e "${CYN}[*]${RST} $*"; }
 ok()    { echo -e "${GRN}[+]${RST} $*"; }
 warn()  { echo -e "${YLW}[!]${RST} $*"; }
-
-# ── rqm.md parser ────────────────────────────────────────────────────────────
-# Collects packages from all rqm.md files. Call after setting DISTRO.
-# Populates globals: RQM_PY_PKGS RQM_OS_PKGS
-declare -a RQM_PY_PKGS=()
-declare -a RQM_OS_PKGS=()
-declare -A _seen_py=() _seen_os=()
-
-load_rqm_files() {
-    local section=""
-    local os_section=""
-
-    case "$DISTRO" in
-        arch)   os_section="pacman" ;;
-        debian) os_section="apt"    ;;
-        *)      os_section=""       ;;
-    esac
-
-    while IFS= read -r file; do
-        [[ -f "$file" ]] || continue
-        section=""
-        while IFS= read -r line || [[ -n "$line" ]]; do
-            # strip leading/trailing whitespace
-            line="${line#"${line%%[![:space:]]*}"}"
-            line="${line%"${line##*[![:space:]]}"}"
-            # skip blank lines and full-line comments
-            [[ -z "$line" || "$line" == \#* ]] && {
-                # detect section markers
-                case "$line" in
-                    "#python") section="python" ;;
-                    "#pacman") section="pacman" ;;
-                    "#apt")    section="apt"    ;;
-                    "#binary") section="binary" ;;
-                esac
-                continue
-            }
-            # strip inline comment
-            pkg="${line%%#*}"
-            pkg="${pkg%"${pkg##*[![:space:]]}"}"
-            [[ -z "$pkg" ]] && continue
-
-            case "$section" in
-                python)
-                    [[ -z "${_seen_py[$pkg]+x}" ]] && { RQM_PY_PKGS+=("$pkg"); _seen_py["$pkg"]=1; }
-                    ;;
-                "$os_section")
-                    [[ -z "${_seen_os[$pkg]+x}" ]] && { RQM_OS_PKGS+=("$pkg"); _seen_os["$pkg"]=1; }
-                    ;;
-            esac
-        done < "$file"
-    done < <(find "$SCRIPT_DIR" -name "rqm.md" 2>/dev/null | sort)
-
-    info "rqm.md: found ${#RQM_PY_PKGS[@]} python pkgs, ${#RQM_OS_PKGS[@]} OS pkgs"
-}
+err()   { echo -e "${RED}[!]${RST} $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ── Detect package manager ────────────────────────────────────────────────────
-if command -v pacman &>/dev/null; then
-    PKG_INSTALL="sudo pacman -S --noconfirm --needed"
-    PKG_UPDATE="sudo pacman -Sy"
-    DISTRO="arch"
-elif command -v apt-get &>/dev/null; then
-    PKG_INSTALL="sudo apt-get install -y"
-    PKG_UPDATE="sudo apt-get update -qq"
-    DISTRO="debian"
-else
-    warn "Unsupported package manager — install system packages manually"
-    PKG_INSTALL="echo SKIP"
-    PKG_UPDATE="true"
-    DISTRO="unknown"
-fi
+# ── Detect distro and package manager ─────────────────────────────────────────
+DISTRO="unknown"
+PKG_MGR="unknown"
+PKG_UPDATE="true"
+PKG_INSTALL="echo SKIP"
+
+detect_distro() {
+    local id=""
+    if [[ -f /etc/os-release ]]; then
+        id=$(. /etc/os-release && echo "${ID:-}")
+    fi
+    [[ -z "$id" && -f /etc/arch-release ]] && id="arch"
+
+    case "$id" in
+        arch|archcraft|manjaro|endeavouros|cachyos|artix|garuda)
+            DISTRO="arch"; PKG_MGR="pacman"
+            PKG_UPDATE="sudo pacman -Sy --noconfirm"
+            PKG_INSTALL="sudo pacman -S --noconfirm --needed"
+            # Prefer AUR helper if available
+            for aur in yay paru trizen; do
+                if command -v "$aur" &>/dev/null; then
+                    PKG_INSTALL="$aur -S --noconfirm --needed"; break
+                fi
+            done
+            ;;
+        ubuntu|debian|kali|parrot|linuxmint|pop|elementary|zorin|mx|raspbian)
+            DISTRO="debian"; PKG_MGR="apt"
+            PKG_UPDATE="sudo apt-get update -qq"
+            PKG_INSTALL="sudo apt-get install -y"
+            ;;
+        fedora|nobara)
+            DISTRO="fedora"; PKG_MGR="dnf"
+            PKG_UPDATE="sudo dnf check-update -q || true"
+            PKG_INSTALL="sudo dnf install -y"
+            ;;
+        rhel|centos|rocky|alma|oracle)
+            DISTRO="rhel"; PKG_MGR="dnf"
+            PKG_UPDATE="sudo dnf check-update -q || true"
+            PKG_INSTALL="sudo dnf install -y"
+            ;;
+        opensuse-leap|opensuse-tumbleweed|opensuse|sles)
+            DISTRO="opensuse"; PKG_MGR="zypper"
+            PKG_UPDATE="sudo zypper refresh -q"
+            PKG_INSTALL="sudo zypper install -y --no-confirm"
+            ;;
+        alpine)
+            DISTRO="alpine"; PKG_MGR="apk"
+            PKG_UPDATE="sudo apk update -q"
+            PKG_INSTALL="sudo apk add"
+            ;;
+        void)
+            DISTRO="void"; PKG_MGR="xbps-install"
+            PKG_UPDATE="sudo xbps-install -Su"
+            PKG_INSTALL="sudo xbps-install -Sy"
+            ;;
+        *)
+            if command -v brew &>/dev/null; then
+                DISTRO="macos"; PKG_MGR="brew"
+                PKG_UPDATE="brew update"
+                PKG_INSTALL="brew install"
+            else
+                warn "Unrecognised distro '$id' — system packages will be skipped"
+                return
+            fi
+            ;;
+    esac
+    info "Detected: $DISTRO ($PKG_MGR)"
+}
+
+detect_distro
+
+# ── rqm.md parser ─────────────────────────────────────────────────────────────
+# Reads only the root-level rqm.md. Supports sections:
+#   #python  #pacman  #apt  #dnf  #zypper  #apk  #xbps  #binary
+declare -a RQM_PY_PKGS=()
+declare -a RQM_OS_PKGS=()
+declare -a RQM_BIN_ENTRIES=()
+declare -A _seen_py=() _seen_os=() _seen_bin=()
+
+load_rqm_files() {
+    local os_section
+    case "$PKG_MGR" in
+        pacman)       os_section="pacman" ;;
+        apt)          os_section="apt"    ;;
+        dnf)          os_section="dnf"    ;;
+        zypper)       os_section="zypper" ;;
+        apk)          os_section="apk"    ;;
+        xbps-install) os_section="xbps"   ;;
+        brew)         os_section="brew"   ;;
+        *)            os_section=""       ;;
+    esac
+
+    local section=""
+    # Read only the root rqm.md (single global manifest)
+    local rqm_file="$SCRIPT_DIR/rqm.md"
+    [[ -f "$rqm_file" ]] || { warn "rqm.md not found at $SCRIPT_DIR/rqm.md"; return; }
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        if [[ -z "$line" || "$line" == \#* ]]; then
+            case "$line" in
+                "#python") section="python" ;;
+                "#pacman") section="pacman" ;;
+                "#apt")    section="apt"    ;;
+                "#dnf")    section="dnf"    ;;
+                "#zypper") section="zypper" ;;
+                "#apk")    section="apk"    ;;
+                "#xbps")   section="xbps"   ;;
+                "#brew")   section="brew"   ;;
+                "#binary") section="binary" ;;
+                *)         ;;
+            esac
+            continue
+        fi
+        pkg="${line%%#*}"
+        pkg="${pkg%"${pkg##*[![:space:]]}"}"
+        [[ -z "$pkg" ]] && continue
+
+        case "$section" in
+            python)
+                [[ -z "${_seen_py[$pkg]+x}" ]] && { RQM_PY_PKGS+=("$pkg"); _seen_py["$pkg"]=1; }
+                ;;
+            "$os_section")
+                [[ -z "${_seen_os[$pkg]+x}" ]] && { RQM_OS_PKGS+=("$pkg"); _seen_os["$pkg"]=1; }
+                ;;
+            binary)
+                [[ -z "${_seen_bin[$pkg]+x}" ]] && { RQM_BIN_ENTRIES+=("$pkg"); _seen_bin["$pkg"]=1; }
+                ;;
+        esac
+    done < "$rqm_file"
+
+    info "rqm.md: ${#RQM_PY_PKGS[@]} python pkgs, ${#RQM_OS_PKGS[@]} OS pkgs (${os_section}), ${#RQM_BIN_ENTRIES[@]} binaries"
+}
 
 info "Detected: $DISTRO - installer starting"
 $PKG_UPDATE || true
