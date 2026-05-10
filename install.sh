@@ -273,11 +273,34 @@ chmod +x "$SCRIPT_DIR/install.sh" "$SCRIPT_DIR/uninstall.sh" 2>/dev/null || true
 ok "Module scripts are executable"
 
 # ── Optional system-wide install ─────────────────────────────────────────────
+# Copies the binary to /usr/local/bin and the tools + updater to /var/lib/secv/
+# so secV works from any directory without keeping the repo on PATH.
 if [ -f "$SCRIPT_DIR/secV" ]; then
     echo ""
-    read -r -p "Install secV to /usr/local/bin? [y/N] " _ans
+    read -r -p "Install secV system-wide? (/usr/local/bin + /var/lib/secv) [y/N] " _ans
     if [[ "$_ans" =~ ^[Yy]$ ]]; then
-        sudo install -m755 "$SCRIPT_DIR/secV" /usr/local/bin/secV && ok "secV installed to /usr/local/bin/secV"
+        # Binary
+        sudo install -m755 "$SCRIPT_DIR/secV" /usr/local/bin/secV
+        ok "binary   → /usr/local/bin/secV"
+
+        # Data directory
+        sudo mkdir -p /var/lib/secv
+
+        # Tools (full recursive copy; preserves all module sub-directories)
+        sudo cp -r "$SCRIPT_DIR/tools" /var/lib/secv/
+        sudo find /var/lib/secv/tools -name "*.py" -exec chmod +x {} \; 2>/dev/null || true
+        sudo find /var/lib/secv/tools -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
+        ok "tools    → /var/lib/secv/tools/"
+
+        # Updater
+        sudo install -m755 "$SCRIPT_DIR/update.py" /var/lib/secv/update.py
+        ok "updater  → /var/lib/secv/update.py"
+
+        echo ""
+        ok "Run 'secV' from anywhere"
+        info "Refresh after pulling new module versions:"
+        echo "     sudo cp -r tools/ /var/lib/secv/"
+        echo "     sudo install -m755 secV /usr/local/bin/secV"
     fi
 fi
 
@@ -301,17 +324,20 @@ if [ -f "$C2_SERVICE" ]; then
 fi
 
 echo ""
-info "Modules (10 total):"
-printf "  %-32s %s\n" "AD/windows/winadsec"      "impacket, ldap3, zig, donut, xorriso, sliver-client (+ nxc, kerbrute, bloodhound)"
-printf "  %-32s %s\n" "network/adsec"            "impacket, ldap3, smbclient, rpcclient (+ nxc, kerbrute, bloodhound)"
+info "Modules (9 total):"
+printf "  %-32s %s\n" "AD/windows/winadsec"      "impacket, ldap3, zig, donut, xorriso (+ nxc, kerbrute, bloodhound)"
+printf "  %-32s %s\n" "AD/linux/adsec"           "impacket, ldap3, smbclient, rpcclient (+ nxc, kerbrute, bloodhound)"
 printf "  %-32s %s\n" "network/netrecon"         "nmap, masscan, arp-scan, scapy, aiohttp"
-printf "  %-32s %s\n" "network/mac_spoof"        "iproute2, psutil"
-printf "  %-32s %s\n" "network/wifi_monitor"     "scapy, aiohttp"
+printf "  %-32s %s\n" "network/mac_spoof"        "iproute2, psutil, netifaces"
+printf "  %-32s %s\n" "network/wifi_monitor"     "scapy, psutil"
 printf "  %-32s %s\n" "mobile/android_pentest"   "adb, apktool, jadx, frida-tools, objection"
 printf "  %-32s %s\n" "mobile/ios_pentest"       "libimobiledevice, frida-tools, objection"
 printf "  %-32s %s\n" "web/websec"               "requests, beautifulsoup4, dnspython"
-printf "  %-32s %s\n" "web/webscan"              "requests"
 printf "  %-32s %s\n" "ctf/ctfpwn"              "nmap, gobuster, hydra (+ optional: sshpass, node)"
 printf "  %-32s %s\n" "WAN tunneling"            "bore (/usr/local/bin/bore)"
 echo ""
-ok "Installation complete — run: ./secV"
+ok "Installation complete"
+echo ""
+echo "  From repo dir:  ./secV"
+echo "  System-wide:    secV            (after system install above)"
+echo "  Custom path:    SECV_HOME=/path/to/secv secV"

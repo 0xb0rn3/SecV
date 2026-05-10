@@ -15,7 +15,7 @@
 `Go` · `Python` · `Bash` · `Rust` · `C++` — one shell, any language
 ---
 
-[![Version](https://img.shields.io/badge/v2.4.2-tauri-0d1117?style=flat-square&labelColor=00d9ff&color=0d1117)](https://github.com/SecVulnHub/SecV)
+[![Version](https://img.shields.io/badge/v2.4.2-tauri-0d1117?style=flat-square&labelColor=00d9ff&color=0d1117)](https://github.com/secvulnhub/secV)
 [![License](https://img.shields.io/badge/MIT-license-0d1117?style=flat-square&labelColor=8b5cf6&color=0d1117)](LICENSE)
 [![Go](https://img.shields.io/badge/Go_1.21+-required-0d1117?style=flat-square&labelColor=00ADD8&color=0d1117)](https://golang.org/)
 [![Platform](https://img.shields.io/badge/Linux%20%7C%20macOS-0d1117?style=flat-square&labelColor=3a3f4b&color=0d1117)](#)
@@ -70,6 +70,7 @@ pip3 install requests beautifulsoup4 dnspython scapy psutil netifaces frida-tool
 | `mac_spoof` | `iproute2` (pre-installed on most distros) | `psutil`, `netifaces` |
 | `wifi_monitor` | `nmap` | `scapy`, `psutil` |
 | `adsec` | `nmap`, `smbclient`, `rpcclient` | `impacket`, `ldap3`, `dnspython` |
+| `winadsec` | `nmap`, `smbclient`, `rpcclient`, `nxc`, `kerbrute` | `impacket`, `ldap3`, `bloodhound` |
 | `ios_pentest` | `libimobiledevice`, `ideviceinstaller` | `requests` |
 
 ¹ rustscan: `cargo install rustscan` — or grab a binary from [GitHub releases](https://github.com/RustScan/RustScan/releases)
@@ -94,17 +95,27 @@ curl -sL https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x8
 ## Installation
 
 ```bash
-git clone https://github.com/SecVulnHub/SecV.git
-cd SecV
+git clone https://github.com/secvulnhub/secV.git
+cd secV
 chmod +x install.sh && ./install.sh
 ```
 
-The installer detects your distro (Arch, Debian, Fedora, Alpine) and installs missing tools using the right package manager. It compiles the Go binary and optionally installs it system-wide.
+The installer detects your distro (Arch, Debian, Fedora, Alpine), installs missing system tools and Python packages, compiles the Go binary, and optionally installs system-wide:
+
+| Path | What goes there |
+|------|-----------------|
+| `/usr/local/bin/secV` | binary |
+| `/var/lib/secv/tools/` | all module scripts |
+| `/var/lib/secv/update.py` | updater |
+| `~/.secv/cache/` | history file (auto-created) |
 
 ```bash
-./secV          # from repo directory
-secV            # if installed system-wide
+./secV                          # from repo — always works
+secV                            # after system install
+SECV_HOME=/custom/path secV    # point at any tools directory
 ```
+
+The binary resolves `tools/` in this order: `$SECV_HOME` → directory next to binary (follows symlinks) → `/var/lib/secv/` → current working directory.
 
 ---
 
@@ -633,14 +644,16 @@ Fill in `help.parameters[*].description` and `help.examples` manually — the ge
 
 ## Module Development
 
+> **Tip:** develop against the repo (`./secV` from repo root — no system install needed). Use `reload` inside the shell to pick up changes without restarting.
+
 ```bash
-mkdir -p tools/scanning/my-tool && cd tools/scanning/my-tool
+mkdir -p tools/network/my-tool && cd tools/network/my-tool
 
 cat > module.json << 'EOF'
 {
   "name": "my-tool",
   "version": "1.0.0",
-  "category": "scanning",
+  "category": "network",
   "description": "Does a thing",
   "author": "you",
   "executable": "python3 main.py",
@@ -685,7 +698,7 @@ secV (my-tool) ❯ run example.com
 
 ## Update System
 
-SecV pulls from `https://github.com/secvulnhub/SecV.git`. On update it stashes local changes, pulls, recompiles the binary if `main.go` changed, and installs Python deps if `requirements.txt` changed.
+SecV pulls from `https://github.com/secvulnhub/secV.git`. On update it stashes local changes, pulls, recompiles the binary if `main.go` changed, and installs Python deps if `requirements.txt` changed.
 
 ```bash
 secV ❯ update                      # interactive update
@@ -696,6 +709,15 @@ python3 update.py --verify         # integrity check
 python3 update.py --repair         # fix common issues
 python3 update.py --rollback       # restore last backup
 python3 update.py --sync-tools     # fix module script permissions
+```
+
+**After `git pull` on a system install**, refresh the data directory:
+
+```bash
+go build -ldflags="-s -w" -o secV .
+sudo install -m755 secV /usr/local/bin/secV
+sudo cp -r tools/ /var/lib/secv/
+sudo install -m755 update.py /var/lib/secv/update.py
 ```
 
 ---
@@ -718,7 +740,7 @@ sudo pacman -S go          # Arch
 sudo apt install golang    # Debian/Ubuntu
 brew install go            # macOS
 
-cd /path/to/SecV
+cd /path/to/secV
 go mod tidy
 go build -o secV .
 ```

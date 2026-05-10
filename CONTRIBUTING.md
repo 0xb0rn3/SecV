@@ -27,8 +27,8 @@ Before you start contributing:
 4. Create a branch for your contribution
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/SecV.git
-cd SecV
+git clone https://github.com/YOUR_USERNAME/secV
+cd secV
 git checkout -b feature/my-awesome-module
 ```
 
@@ -36,11 +36,13 @@ git checkout -b feature/my-awesome-module
 
 SecV consists of three main components:
 
-1. **Module Loader** - Discovers and loads modules from the `tools/` directory
+1. **Module Loader** - Discovers `tools/` via a 4-level search: `$SECV_HOME` → binary-relative path → `/var/lib/secv/` → cwd
 2. **Execution Engine** - Executes modules with proper context and timeout handling
 3. **Interactive Shell** - Metasploit-style interface for user interaction
 
 Modules are self-contained units that communicate via JSON over stdin/stdout.
+
+> **For development:** always use `./secV` from the repo root. The binary finds `tools/` next to itself, so no system install is needed. Use `reload` inside the shell to pick up new or changed modules.
 
 ---
 
@@ -52,15 +54,15 @@ Let's create a simple port checker module:
 
 ```bash
 # 1. Create module directory
-mkdir -p tools/scanning/port-checker
-cd tools/scanning/port-checker
+mkdir -p tools/network/port-checker
+cd tools/network/port-checker
 
 # 2. Create module.json
 cat > module.json << 'EOF'
 {
   "name": "port-checker",
   "version": "1.0.0",
-  "category": "scanning",
+  "category": "network",
   "description": "Check if a specific port is open on target",
   "author": "YourName",
   "executable": "python3 checker.py",
@@ -225,44 +227,23 @@ Choose the most appropriate category for your module:
 
 | Category | Description | Examples |
 |----------|-------------|----------|
-| `network` | Network manipulation and analysis | MAC spoofing, routing, traffic shaping |
-| `scanning` | Port scanning and service detection | Nmap wrappers, custom scanners |
-| `vulnerability` | Vulnerability assessment | CVE checkers, config auditors |
-| `exploitation` | Exploit frameworks and PoCs | Exploit scripts, payload generators |
-| `reconnaissance` | Information gathering | OSINT tools, subdomain enumeration |
-| `web` | Web application testing | Fuzzing, crawling, injection testing |
-| `wireless` | Wireless network attacks | WiFi cracking, Bluetooth exploitation |
-| `forensics` | Digital forensics | Memory analysis, artifact extraction |
-| `post-exploitation` | Post-compromise activities | Privilege escalation, persistence |
-| `reporting` | Documentation and reporting | Report generators, formatters |
-| `misc` | Utilities and helpers | Encoders, converters, utilities |
+| `network` | Network manipulation and analysis | netrecon, mac_spoof, wifi_monitor |
+| `AD` | Active Directory attack and post-exploitation | adsec, winadsec |
+| `mobile` | Mobile device pentesting | android_pentest, ios_pentest |
+| `web` | Web application testing | websec |
+| `ctf` | CTF automation | ctfpwn |
 
 ---
 
 ## 📦 **SecV Installation & Dependencies**
 
-### Installation Tiers
-
-SecV supports three installation levels to accommodate different use cases:
+### Installation
 
 ```bash
 ./install.sh
 ```
 
-**1. Basic Installation** - Core functionality only
-- Dependencies: `cmd2`, `rich`
-- Use case: Basic module execution, shell interface
-- Size: Minimal (~5MB)
-
-**2. Standard Installation** ⭐ Recommended
-- Dependencies: Core + `python-nmap`, `scapy`
-- Use case: Full scanning capabilities, most modules
-- Size: ~50MB
-
-**3. Full Installation** - All features
-- Dependencies: Everything in `requirements.txt`
-- Use case: All modules including web scraping, SSH, crypto
-- Size: ~100MB
+All dependencies are declared in `rqm.md` at the repo root. `install.sh` reads `rqm.md` directly and handles all distros (pacman/apt/dnf/zypper/apk/xbps) automatically.
 
 ### Writing Dependency-Aware Modules
 
@@ -308,31 +289,31 @@ Use the `optional_dependencies` field for libraries that enhance but aren't requ
 }
 ```
 
-### Testing Your Module Across Installation Tiers
+### Testing Your Module Across Dependency Configurations
 
 Before submitting, test your module with different dependency configurations:
 
 ```bash
-# Test with minimal dependencies
+# Test with optional deps missing
 pip3 uninstall scapy python-nmap -y
 ./secV
 secV > use mymodule
 secV (mymodule) > run target
 
-# Test with full dependencies
-pip3 install -r requirements.txt
+# Test with all deps (install.sh handles this)
+bash install.sh
 ./secV
 secV > use mymodule
 secV (mymodule) > run target
 ```
 
 Your module should:
-- ✅ Work at basic level (even if with reduced features)
+- ✅ Work with core features (even if optional features are reduced)
 - ✅ Auto-detect available libraries
 - ✅ Inform users about missing optional features
 - ✅ Never crash due to missing optional dependencies
 
-### Example: Multi-Tier Module Pattern
+### Example: Graceful Dependency Detection Pattern
 
 ```python
 #!/usr/bin/env python3
@@ -395,15 +376,17 @@ def urllib_scan(url):
 
 ### Common Optional Dependencies
 
-| Library | Use Case | Installation Tier |
-|---------|----------|------------------|
-| `python-nmap` | Nmap integration | Standard |
-| `scapy` | Raw packets, SYN scan | Standard |
-| `requests` | HTTP operations | Full |
-| `beautifulsoup4` | HTML parsing | Full |
-| `paramiko` | SSH operations | Full |
-| `dnspython` | DNS queries | Full |
-| `pycryptodome` | Cryptography | Full |
+| Library | Use Case |
+|---------|----------|
+| `python-nmap` | Nmap integration |
+| `scapy` | Raw packets, SYN scan |
+| `requests` | HTTP operations |
+| `beautifulsoup4` | HTML parsing |
+| `paramiko` | SSH operations |
+| `dnspython` | DNS queries |
+| `pycryptodome` | Cryptography |
+
+All of the above are declared in `rqm.md` and installed by `install.sh`.
 
 ### Platform-Specific Notes
 
@@ -423,14 +406,14 @@ def urllib_scan(url):
 
 When submitting a module, ensure:
 
-- [ ] Module works with Basic installation (core only)
+- [ ] Pip packages added to `rqm.md` under `#python`; system packages under distro sections
 - [ ] Optional dependencies are properly detected
 - [ ] Fallback methods provided for missing libraries
 - [ ] `module.json` lists optional dependencies
 - [ ] README documents what features need which libraries
 - [ ] No hard imports of optional libraries at module level
 - [ ] User-friendly messages for missing optional features
-- [ ] Tested on at least 2 dependency configurations
+- [ ] Tested with all deps installed by `install.sh`
 
 ## Programming Language Support
 
@@ -763,17 +746,11 @@ git push origin feature/your-module
 Brief description of what your module does.
 
 ### Category
-- [ ] Network
-- [ ] Scanning
-- [ ] Vulnerability
-- [ ] Exploitation
-- [ ] Reconnaissance
-- [ ] Web
-- [ ] Wireless
-- [ ] Forensics
-- [ ] Post-Exploitation
-- [ ] Reporting
-- [ ] Misc
+- [ ] network
+- [ ] AD
+- [ ] mobile
+- [ ] web
+- [ ] ctf
 
 ### Testing
 - [ ] Tested on Linux
@@ -797,16 +774,15 @@ Brief description of what your module does.
 
 ```bash
 # Clone repository
-git clone https://github.com/SecVulnHub/SecV.git
-cd SecV
+git clone https://github.com/secvulnhub/secV
+cd secV
 
-# Install development dependencies
-pip3 install -r requirements-dev.txt
-
-# Install pre-commit hooks (optional)
-pip3 install pre-commit
-pre-commit install
+# Install all dependencies
+bash install.sh
+# Answer N to the system-wide install prompt — use ./secV from the repo for dev
 ```
+
+The loader finds `tools/` relative to the binary, so `./secV` always works from the repo without copying anything to `/var/lib/secv/`. Only answer Y to the system-wide prompt when packaging a release build.
 
 ### Core Platform Components
 

@@ -3,18 +3,24 @@
 ## Quick Install
 
 ```bash
-git clone https://github.com/SecVulnHub/SecV.git
-cd SecV
-chmod +x install.sh && ./install.sh
+git clone https://github.com/secvulnhub/secV && cd secV && bash install.sh
 ```
 
 The installer detects your distro (Arch, Debian, Fedora, Alpine) and handles everything:
-compiles the Go binary, installs system tools (`adb`, `apktool`, `nmap`, etc.), and
-installs Python module dependencies. Optionally installs `secV` to `/usr/local/bin`.
+compiles the Go binary, installs system tools (`adb`, `apktool`, `nmap`, etc.),
+installs Python module dependencies, and optionally installs system-wide:
+
+| Path | Contents |
+|------|----------|
+| `/usr/local/bin/secV` | the binary |
+| `/var/lib/secv/tools/` | all module scripts |
+| `/var/lib/secv/update.py` | updater |
+| `~/.secv/cache/` | per-user history (auto-created) |
 
 ```bash
-./secV          # from repo directory
-secV            # if installed system-wide
+./secV                          # from repo directory (dev)
+secV                            # after system install
+SECV_HOME=/custom/path secV    # explicit path override
 ```
 
 ---
@@ -23,12 +29,15 @@ secV            # if installed system-wide
 
 1. Detects distro and package manager (`pacman`, `apt`, `dnf`, `apk`)
 2. Checks Python 3.8+ and installs if missing
-3. Installs `curl`, `unzip`, `java` (for Android RE tools)
-4. Downloads and installs Android tools: `aapt`, `apktool`, `jadx`
+3. Installs system tools from `rqm.md` (`nmap`, `adb`, `apktool`, etc.)
+4. Downloads `bore` for WAN tunneling
 5. Checks Go 1.21+ and installs if missing
-6. Compiles the Go binary: `go build -o secV .`
-7. Installs Python module dependencies via `requirements.txt`
-8. Optionally links binary to `/usr/local/bin/secV`
+6. Compiles the Go binary: `go build -ldflags="-s -w" -o secV .`
+7. Installs Python packages from `rqm.md` via pip
+8. **Optional system install** (prompted):
+   - `sudo install -m755 secV /usr/local/bin/secV`
+   - `sudo cp -r tools/ /var/lib/secv/tools/`
+   - `sudo install -m755 update.py /var/lib/secv/update.py`
 
 ---
 
@@ -69,20 +78,35 @@ chmod +x secV
 ```bash
 ./install.sh
 # Answer N when asked about system-wide install
-./secV
+./secV           # run from repo directory
 ```
 
 ### System-Wide (recommended)
 ```bash
 ./install.sh
 # Answer Y when asked about system-wide install
-secV             # available from anywhere
+secV             # available from any directory
 ```
 
-### Manual system-wide link
+### Manual system-wide install
 ```bash
-sudo ln -sf "$(pwd)/secV" /usr/local/bin/secV
+sudo install -m755 secV /usr/local/bin/secV
+sudo mkdir -p /var/lib/secv
+sudo cp -r tools/ /var/lib/secv/
+sudo install -m755 update.py /var/lib/secv/update.py
 ```
+
+### Custom path override
+Use `SECV_HOME` to point the binary at any tools directory — useful for multiple installs or CI:
+```bash
+SECV_HOME=/opt/secv-dev secV
+```
+
+The loader searches in this order:
+1. `$SECV_HOME` env var
+2. Directory of the real binary (follows symlinks), if `tools/` exists there
+3. `/var/lib/secv/` (standard system install location)
+4. Current working directory (fallback for portable/ad-hoc use)
 
 ---
 
@@ -90,7 +114,7 @@ sudo ln -sf "$(pwd)/secV" /usr/local/bin/secV
 
 ```bash
 ./secV
-secV ❯ show modules      # should list netrecon, mac_spoof, wifi_monitor, android_pentest, ios_pentest, webscan
+secV ❯ show modules    # lists: netrecon, mac_spoof, wifi_monitor, adsec, winadsec, android_pentest, ios_pentest, websec, ctfpwn
 secV ❯ show categories
 secV ❯ help
 secV ❯ exit
@@ -100,47 +124,59 @@ secV ❯ exit
 
 ## Directory Structure
 
-After installation:
+**Repository (dev / local install):**
 
 ```
-SecV/
+secV/
 ├── secV                          # Compiled Go binary
+├── main.go                       # Shell source
 ├── install.sh                    # Installer
 ├── uninstall.sh                  # Uninstaller
 ├── update.py                     # Updater
 ├── gen_module.py                 # Module JSON generator
-├── requirements.txt              # Python dependencies (tiered)
+├── rqm.md                        # Global requirements manifest — all modules, all distros
+├── requirements.txt              # pip-only convenience (mirrors rqm.md #python section)
 ├── go.mod / go.sum               # Go module manifest
-├── main.go                       # Shell source
 └── tools/
     ├── network/
     │   ├── netrecon/             # Multi-engine network recon
     │   ├── mac_spoof/            # Connection-aware MAC rotator
     │   └── wifi_monitor/         # Smart WiFi monitor + threat detector
+    ├── AD/
+    │   ├── linux/                # adsec — Linux-side AD pentest
+    │   └── windows/              # winadsec — Windows AD post-exploitation
     ├── mobile/
     │   ├── android/              # Android pentesting suite
-    │   │   ├── module.json
-    │   │   ├── android_pentest.py
-    │   │   ├── agent/            # On-device C2 agent
-    │   │   ├── apk_backdoor/     # APK repackaging + WAN C2
-    │   │   └── c2_persistence/   # systemd service + watchdog for C2 attacker side
     │   └── ios/                  # iOS pentesting suite
-    │       ├── module.json
-    │       └── ios_pentest.py
-    └── web/
-        └── webscan/              # Web vulnerability scanner (SQLi, XSS, CSRF, ...)
+    ├── web/
+    │   └── websec/               # Full-stack web attack surface tool
+    └── ctf/                      # ctfpwn — CTF autopwn
+```
+
+**After system-wide install (`install.sh` → Y):**
+
+```
+/usr/local/bin/
+└── secV                          # binary
+
+/var/lib/secv/
+├── update.py                     # updater (secV update command targets this)
+└── tools/                        # full copy of tools/ from repo
+    ├── network/  ...
+    ├── AD/       ...
+    ├── mobile/   ...
+    ├── web/      ...
+    └── ctf/      ...
+
+~/.secv/
+└── cache/                        # history file, per-user (auto-created)
 ```
 
 ---
 
 ## Module Dependencies
 
-SecV uses a tiered dependency model. The installer installs everything in `requirements.txt`.
-
-| Tier | Packages | Notes |
-|------|----------|-------|
-| Core | `psutil`, `requests`, `cryptography`, `netifaces`, `scapy`, `python-nmap`, `aiohttp`, `rich` | Always installed |
-| Full | `beautifulsoup4`, `dnspython`, `pycryptodome`, `paramiko`, `pyyaml`, `frida-tools`, `objection` | Enabled by default |
+All dependencies are declared in `rqm.md`. Run `install.sh` to install everything. For pip-only environments: `pip3 install -r requirements.txt --break-system-packages`
 
 `install.sh` also installs system tools (`adb`, `apktool`, `jadx`, `nmap`, `masscan`, `arp-scan`) and [bore](https://github.com/ekzhang/bore) for WAN tunneling.
 
@@ -164,20 +200,48 @@ python3 update.py --verify    # integrity check
 python3 update.py --rollback  # restore last backup
 ```
 
+**After `git pull` on a system install**, refresh `/var/lib/secv/` manually:
+
+```bash
+cd /path/to/secv-repo
+git pull
+go build -ldflags="-s -w" -o secV .
+sudo install -m755 secV /usr/local/bin/secV
+sudo cp -r tools/ /var/lib/secv/
+sudo install -m755 update.py /var/lib/secv/update.py
+```
+
 ---
 
 ## Uninstalling
 
 ```bash
-chmod +x uninstall.sh && ./uninstall.sh    # removes system-wide binary
+chmod +x uninstall.sh && ./uninstall.sh    # removes /usr/local/bin/secV
 
-# Full removal
-cd .. && rm -rf SecV/
+# Remove system data directory
+sudo rm -rf /var/lib/secv/
+
+# Remove per-user cache
+rm -rf ~/.secv/
+
+# Full removal of repo
+cd .. && rm -rf secV/
 ```
 
 ---
 
 ## Troubleshooting
+
+**Modules not found after system install**
+```bash
+# The binary can't find tools/ — re-copy them
+sudo mkdir -p /var/lib/secv
+sudo cp -r tools/ /var/lib/secv/
+sudo install -m755 update.py /var/lib/secv/update.py
+
+# Or point the binary at the repo directly
+SECV_HOME=/path/to/secv-repo secV
+```
 
 **Go binary won't compile**
 ```bash
@@ -213,5 +277,5 @@ pip3 install -r requirements.txt --break-system-packages
 
 ## Support
 
-- Issues: https://github.com/SecVulnHub/SecV/issues
+- Issues: https://github.com/secvulnhub/secV/issues
 - Docs: [README.md](README.md), [MODULES.md](MODULES.md), [CONTRIBUTING.md](CONTRIBUTING.md)

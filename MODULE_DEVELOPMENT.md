@@ -33,9 +33,9 @@ cd tools/category/modulename
 
 ## Handling Dependencies
 
-### The Golden Rule: **Never Break Basic Installation**
+### The Golden Rule: **Never Break Installation**
 
-Your module MUST work with the Basic installation (just `cmd2` and `rich`). Advanced features can require optional dependencies, but core functionality should always work.
+Your module MUST work with all deps listed in `rqm.md` installed by `install.sh`. Optional dependencies should be detected at runtime and handled gracefully. Advanced features can require optional dependencies, but core functionality should always work.
 
 ### Dependency Detection Pattern
 
@@ -257,9 +257,8 @@ Test your module in these configurations:
 
 | Configuration | Dependencies | Expected Behavior |
 |--------------|--------------|-------------------|
-| **Basic** | cmd2, rich only | Core features work |
-| **Standard** | + python-nmap, scapy | Scanning features work |
-| **Full** | All requirements.txt | All features work |
+| **All deps** | Everything in rqm.md (installed by install.sh) | All features work |
+| **Optional deps missing** | Subset only | Core features work; optional features degrade gracefully |
 
 ### Testing Script Template
 
@@ -482,9 +481,9 @@ def check_and_warn():
    - Always provide fallback
    - Always inform user gracefully
 
-4. **Don't assume installation tier**
-   - Your module might run on Basic installation
-   - Detect, don't assume
+4. **Don't assume all optional deps are present**
+   - Your module might run without optional libraries
+   - Detect at runtime, don't assume
 
 ---
 
@@ -503,22 +502,19 @@ def check_and_warn():
 | `os` | File operations |
 | `sys` | System operations |
 
-### Optional - Standard Tier
+### Optional Dependencies
 
-| Module | Use Case | Install Command |
-|--------|----------|-----------------|
-| `scapy` | Raw packets, SYN scan | `pip3 install scapy` |
-| `python-nmap` | Nmap integration | `pip3 install python-nmap` |
+All optional packages are listed in `rqm.md` and installed by `install.sh`. Detect them at runtime with try/except.
 
-### Optional - Full Tier
-
-| Module | Use Case | Install Command |
-|--------|----------|-----------------|
-| `requests` | HTTP operations | `pip3 install requests` |
-| `beautifulsoup4` | HTML parsing | `pip3 install beautifulsoup4` |
-| `paramiko` | SSH operations | `pip3 install paramiko` |
-| `dnspython` | DNS queries | `pip3 install dnspython` |
-| `pycryptodome` | Cryptography | `pip3 install pycryptodome` |
+| Module | Use Case |
+|--------|----------|
+| `scapy` | Raw packets, SYN scan |
+| `python-nmap` | Nmap integration |
+| `requests` | HTTP operations |
+| `beautifulsoup4` | HTML parsing |
+| `paramiko` | SSH operations |
+| `dnspython` | DNS queries |
+| `pycryptodome` | Cryptography |
 
 ---
 
@@ -526,13 +522,13 @@ def check_and_warn():
 
 Before submitting your module:
 
-- [ ] Works with Basic installation (core only)
+- [ ] Works with all deps installed by `install.sh` (via `rqm.md`)
 - [ ] Optional dependencies detected with try/except
 - [ ] Fallback methods provided for missing libraries
 - [ ] module.json lists all optional_dependencies
 - [ ] README documents dependency requirements
 - [ ] User-friendly messages for missing features
-- [ ] Tested on Basic, Standard, and Full installations
+- [ ] Tested with full deps (install.sh) and with optional deps missing
 - [ ] No hardcoded imports of optional libraries
 - [ ] Code follows SecV style guidelines
 - [ ] Documentation is clear and complete

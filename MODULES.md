@@ -3,14 +3,15 @@
 Complete reference of all SecV security modules.
 
 **Version:** 2.4.2  
-**Total Modules:** 8  
-**Categories:** network (4), mobile (2), web (1), ctf (1)
+**Total Modules:** 9  
+**Categories:** network (3), AD (2), mobile (2), web (1), ctf (1)
 
 ---
 
 ## Quick Navigation
 
 - [Network](#network)
+- [Active Directory](#active-directory)
 - [Mobile](#mobile)
 - [Web](#web)
 - [Module Development](#module-development)
@@ -40,10 +41,10 @@ Runs nmap, masscan, rustscan, arp-scan, and Shodan simultaneously, merges result
 | `exclude` | string | — | Comma-separated hosts/CIDRs to skip |
 | `passive_only` | boolean | `false` | No active probing — Shodan/DNS only |
 
-**Installation Tiers:**
-- Basic: TCP connect, DNS, WHOIS, ASN lookup
-- Standard: + SYN scan (scapy), Nmap integration
-- Full: + Shodan enrichment, live NVD CVE correlation
+**Optional feature availability:**
+- Without optional deps: TCP connect, DNS, WHOIS, ASN lookup
+- With scapy/nmap: + SYN scan, Nmap integration
+- With Shodan API key: + Shodan enrichment, live NVD CVE correlation
 
 **Quick Start:**
 ```
@@ -129,6 +130,8 @@ secV (wifi_monitor) ❯ run 192.168.1.0/24
 
 ---
 
+## Active Directory
+
 ### `adsec` v1.0.0
 **Active Directory Security Assessment**
 
@@ -198,6 +201,22 @@ secV (adsec) ❯ set domain corp.local
 secV (adsec) ❯ set username analyst
 secV (adsec) ❯ set password 'P@ss123'
 secV (adsec) ❯ run 192.168.1.50
+```
+
+---
+
+### `winadsec` v1.0.0
+**Windows Active Directory Post-Exploitation**
+
+Windows-side AD post-exploitation toolkit covering 37 operations including UAC bypass, WMI persistence, Sliver C2 session management, and ISO payload generation. Designed to run from a compromised Windows host against an AD environment.
+
+**Path:** `tools/AD/windows/`
+
+**Quick Start:**
+```
+secV ❯ use winadsec
+secV (winadsec) ❯ set operation uac_bypass
+secV (winadsec) ❯ run 192.168.1.50
 ```
 
 ---
@@ -591,12 +610,12 @@ Descriptions and `examples` blocks must be filled in manually.
 
 ### Contribution Checklist
 
-- [ ] Module works at Basic tier (no optional deps)
+- [ ] Module works with all deps listed in `rqm.md` installed by `install.sh`; optional deps detected at runtime and handled gracefully
 - [ ] `module.json` with complete `help.parameters` section
 - [ ] `README.md` inside the module directory
 - [ ] No unhandled exceptions reaching stdout
 - [ ] Binary names (not pip packages) in `dependencies`
-- [ ] New pip packages added to `requirements.txt` with tier comment
+- [ ] New pip packages added to `rqm.md` under `#python`; system packages added under the relevant distro sections (`#pacman`/`#apt`/`#dnf`/etc.)
 - [ ] Update this `MODULES.md` file
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
@@ -610,9 +629,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
 | `netrecon` | TCP/DNS | + SYN/Nmap | + Shodan/CVE | ✓ | ✓ |
 | `mac_spoof` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `wifi_monitor` | TCP-ping | + ARP/scapy | + CVE lookup | ✓ | ✓ |
+| `adsec` | discover/enum | + spray/kerberoast | + bloodhound/secretsdump | ✓ | ✓ |
+| `winadsec` | — | — | Full (requires Windows target + Sliver C2) | ✓ | ✓ |
 | `android_pentest` | recon/adb | + Frida | + all ops | ✓ | ✓ |
 | `ios_pentest` | static IPA | + idevice | + Frida/JB | ✓ | ✓ |
 | `websec` | recon/DNS | + requests/active | + bs4/spider | ✓ | ✓ |
+| `ctfpwn` | list/info | — | + run with tools | ✓ | ✓ |
 
 ---
 

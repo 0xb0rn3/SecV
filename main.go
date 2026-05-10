@@ -293,15 +293,46 @@ type SecV struct {
 	msfCfg        *msfRPCConfig // loaded from ~/.secv/msf_rpc.json
 }
 
+// resolveSecvHome returns the directory that contains tools/ and update.py.
+// Resolution order:
+//  1. $SECV_HOME env var (explicit override, always wins)
+//  2. Directory of the real binary after following any symlinks
+//     — works for ./secV (dev) and ln -sf … /usr/local/bin/secV
+//     — only accepted if tools/ exists there (guards against bare /usr/local/bin)
+//  3. /var/lib/secv — standard system-install location copied by install.sh
+//  4. Current working directory — last-resort for ad-hoc / portable use
+func resolveSecvHome() string {
+	if env := os.Getenv("SECV_HOME"); env != "" {
+		return env
+	}
+	if exe, err := os.Executable(); err == nil {
+		if real, err := filepath.EvalSymlinks(exe); err == nil {
+			dir := filepath.Dir(real)
+			if _, e := os.Stat(filepath.Join(dir, "tools")); e == nil {
+				return dir
+			}
+		}
+	}
+	if _, err := os.Stat("/var/lib/secv/tools"); err == nil {
+		return "/var/lib/secv"
+	}
+	wd, _ := os.Getwd()
+	return wd
+}
+
 func NewSecV() *SecV {
-	home, _ := os.Getwd()
+	home := resolveSecvHome()
+	userHome, _ := os.UserHomeDir()
+	cacheDir := filepath.Join(userHome, ".secv", "cache")
+	_ = os.MkdirAll(cacheDir, 0750)
+	wd, _ := os.Getwd()
 	return &SecV{
 		modules:  []*Module{},
 		params:   make(map[string]string),
 		secvHome: home,
 		toolsDir: filepath.Join(home, "tools"),
-		cacheDir: filepath.Join(home, ".cache"),
-		workDir:  home,
+		cacheDir: cacheDir,
+		workDir:  wd,
 		distro:   detectDistro(),
 	}
 }
@@ -1603,7 +1634,10 @@ func main() {
 		}
 		fmt.Printf("%s  os   %s %s\n", DIM, RESET, line)
 	}
-	fmt.Printf("%s  path %s %s\n\n", DIM, RESET, secv.secvHome)
+	fmt.Printf("%s  home %s %s\n", DIM, RESET, secv.secvHome)
+	if secv.workDir != secv.secvHome {
+		fmt.Printf("%s  cwd  %s %s\n", DIM, RESET, secv.workDir)
+	}
 
 	// Load modules
 	if err := secv.ScanModules(); err != nil {
