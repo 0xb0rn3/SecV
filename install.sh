@@ -148,113 +148,109 @@ load_rqm_files() {
     info "rqm.md: ${#RQM_PY_PKGS[@]} python pkgs, ${#RQM_OS_PKGS[@]} OS pkgs (${os_section}), ${#RQM_BIN_ENTRIES[@]} binaries"
 }
 
-info "Detected: $DISTRO - installer starting"
 $PKG_UPDATE || true
 
-# Load rqm.md files from the repo tree
+# Load global rqm.md
 load_rqm_files
 
-# ── System packages (from rqm.md) ─────────────────────────────────────────────
+# ── System packages ────────────────────────────────────────────────────────────
 info "Installing system packages..."
 
-if [ "${#RQM_OS_PKGS[@]}" -gt 0 ] && [ "$DISTRO" != "unknown" ]; then
-    $PKG_INSTALL "${RQM_OS_PKGS[@]}" || warn "Some system packages failed - check manually"
+if [ "${#RQM_OS_PKGS[@]}" -gt 0 ] && [ "$PKG_MGR" != "unknown" ]; then
+    $PKG_INSTALL "${RQM_OS_PKGS[@]}" || warn "Some system packages failed — check manually"
 else
-    # Fallback if no rqm.md found or unsupported distro
-    if [ "$DISTRO" = "arch" ]; then
-        $PKG_INSTALL python python-pip nmap masscan arp-scan whois iproute2 \
-            jdk-openjdk android-tools apktool nmap-ncat git curl wget || warn "Some system packages failed"
-    elif [ "$DISTRO" = "debian" ]; then
-        $PKG_INSTALL python3 python3-pip nmap masscan arp-scan whois iproute2 \
-            android-tools-adb apktool default-jdk git curl wget || warn "Some system packages failed"
-    fi
+    warn "No OS packages to install (distro '$DISTRO' / manager '$PKG_MGR' not matched in rqm.md)"
 fi
 
+# jadx is not in most repos — guide the user
 if ! command -v jadx &>/dev/null; then
-    if [ "$DISTRO" = "arch" ]; then
-        warn "jadx not found - install via AUR: yay -S jadx"
-    else
-        warn "jadx not found - get it from github.com/skylot/jadx/releases"
-    fi
+    case "$DISTRO" in
+        arch) warn "jadx: install via AUR: yay -S jadx" ;;
+        *)    warn "jadx: download from github.com/skylot/jadx/releases" ;;
+    esac
 fi
 
-# ── Python packages (from rqm.md) ─────────────────────────────────────────────
+# ── Python packages ─────────────────────────────────────────────────────────────
 info "Installing Python packages..."
 
+pip_install() {
+    local pip_cmd="pip3"
+    command -v pip3 &>/dev/null || { warn "pip3 not found — skipping Python packages"; return 1; }
+    if pip3 install --break-system-packages --quiet "$@" 2>/dev/null; then return 0; fi
+    if pip3 install --quiet "$@" 2>/dev/null; then return 0; fi
+    pip3 install --user --quiet "$@" 2>/dev/null
+}
+
 if [ "${#RQM_PY_PKGS[@]}" -gt 0 ]; then
-    pip3 install --break-system-packages --quiet "${RQM_PY_PKGS[@]}" 2>/dev/null \
-        || pip3 install --quiet "${RQM_PY_PKGS[@]}" 2>/dev/null \
-        || pip3 install --user --quiet "${RQM_PY_PKGS[@]}" || warn "Some pip packages failed"
+    pip_install "${RQM_PY_PKGS[@]}" || warn "Some pip packages failed"
 else
-    # Fallback hardcoded list
-    pip3 install --break-system-packages --quiet \
-        requests rich psutil scapy aiohttp netifaces frida-tools objection \
-        cryptography flask qrcode pillow 2>/dev/null || warn "Some pip packages failed"
+    warn "No Python packages found in rqm.md"
 fi
+ok "Python packages done"
 
-ok "Python packages installed"
-
-# ── bore binary ───────────────────────────────────────────────────────────────
-info "Checking bore (WAN tunneling)..."
+# ── bore binary (WAN tunneling) ────────────────────────────────────────────────
+info "Checking bore..."
 BORE_DEST="/usr/local/bin/bore"
 
 install_bore() {
-    # Try to get latest release URL from GitHub
-    local arch
-    arch=$(uname -m)
-    local tarname=""
+    local arch; arch=$(uname -m)
+    local tarname
     case "$arch" in
         x86_64)  tarname="bore-v0.5.1-x86_64-unknown-linux-musl.tar.gz" ;;
         aarch64) tarname="bore-v0.5.1-aarch64-unknown-linux-musl.tar.gz" ;;
-        *)       warn "No pre-built bore for arch $arch"; return 1 ;;
+        *) warn "bore: no pre-built binary for $arch"; return 1 ;;
     esac
-
     local url="https://github.com/ekzhang/bore/releases/latest/download/$tarname"
-    local tmp
-    tmp=$(mktemp -d)
-    trap 'rm -rf "$tmp"' RETURN
-
+    local tmp; tmp=$(mktemp -d); trap 'rm -rf "$tmp"' RETURN
     if wget -q "$url" -O "$tmp/bore.tar.gz" 2>/dev/null || curl -fsSL "$url" -o "$tmp/bore.tar.gz" 2>/dev/null; then
-        tar -xf "$tmp/bore.tar.gz" -C "$tmp" 2>/dev/null || unzip -q "$tmp/bore.tar.gz" -d "$tmp" 2>/dev/null || true
-        local bin
-        bin=$(find "$tmp" -name bore -not -name "*.tar.gz" -type f | head -1)
-        if [ -n "$bin" ]; then
-            sudo install -m755 "$bin" "$BORE_DEST"
-            ok "bore installed to $BORE_DEST"
-            return 0
-        fi
+        tar -xf "$tmp/bore.tar.gz" -C "$tmp" 2>/dev/null || true
+        local bin; bin=$(find "$tmp" -name bore -type f ! -name "*.tar.gz" | head -1)
+        [[ -n "$bin" ]] && sudo install -m755 "$bin" "$BORE_DEST" && ok "bore → $BORE_DEST" && return 0
     fi
-
-    # cargo fallback
-    if command -v cargo &>/dev/null; then
-        cargo install bore-cli --quiet && ok "bore installed via cargo"
-        return 0
-    fi
-
+    command -v cargo &>/dev/null && cargo install bore-cli --quiet && ok "bore installed via cargo" && return 0
     return 1
 }
 
 if command -v bore &>/dev/null; then
-    ok "bore already installed: $(command -v bore)"
-elif [ -f /tmp/bore ]; then
-    sudo install -m755 /tmp/bore "$BORE_DEST" && ok "bore installed from /tmp/bore to $BORE_DEST"
+    ok "bore: $(command -v bore)"
+elif [[ -f /tmp/bore ]]; then
+    sudo install -m755 /tmp/bore "$BORE_DEST" && ok "bore installed from /tmp/bore"
 else
     install_bore || {
-        warn "bore auto-install failed. Download from: https://github.com/ekzhang/bore/releases"
-        warn "Then: sudo install -m755 bore /usr/local/bin/bore"
+        warn "bore auto-install failed"
+        warn "Manual: https://github.com/ekzhang/bore/releases → sudo install -m755 bore /usr/local/bin/bore"
     }
 fi
 
 # ── Metasploit (optional) ─────────────────────────────────────────────────────
 if ! command -v msfconsole &>/dev/null; then
-    warn "Metasploit not found — required for backdoor_apk, msf_handler, wan_expose"
-    if [ "$DISTRO" = "debian" ]; then
-        echo "  Install Metasploit: https://github.com/rapid7/metasploit-framework/wiki/Nightly-Installers"
-    elif [ "$DISTRO" = "arch" ]; then
-        echo "  Install: sudo pacman -S metasploit  (or via AUR)"
-    fi
+    warn "Metasploit not found (optional — needed for msf_handler, wan_expose, backdoor_apk)"
+    case "$DISTRO" in
+        arch|archcraft|manjaro|cachyos) echo "  → sudo pacman -S metasploit  (or: yay -S metasploit)" ;;
+        debian|ubuntu|kali|parrot)     echo "  → https://github.com/rapid7/metasploit-framework/wiki/Nightly-Installers" ;;
+        fedora|rhel)                   echo "  → sudo dnf install metasploit" ;;
+        *)                             echo "  → https://docs.metasploit.com/docs/using-metasploit/getting-started/nightly-installers.html" ;;
+    esac
 else
     ok "Metasploit: $(command -v msfconsole)"
+fi
+
+# ── Zig cross-compiler (needed for DLL generation in winadsec) ────────────────
+if ! command -v zig &>/dev/null && [[ ! -f /tmp/zig-linux-x86_64-0.14.0/zig ]]; then
+    warn "zig not found — required for winadsec gen_proxy_dll / gen_uac_dll"
+    echo "  → wget https://ziglang.org/download/0.14.0/zig-linux-x86_64-0.14.0.tar.xz"
+    echo "     tar xf zig-linux-x86_64-0.14.0.tar.xz -C /tmp"
+    echo "     (or: sudo ln -s /tmp/zig-linux-x86_64-0.14.0/zig /usr/local/bin/zig)"
+elif command -v zig &>/dev/null; then
+    ok "zig: $(zig version 2>/dev/null || command -v zig)"
+fi
+
+# ── donut shellcode generator ─────────────────────────────────────────────────
+if ! command -v donut &>/dev/null && [[ ! -f /tmp/donut-1.0/donut ]]; then
+    warn "donut not found — required for winadsec gen_shellcode"
+    echo "  → pip3 install donut-shellcode  (or build: github.com/TheWover/donut)"
+elif command -v donut &>/dev/null; then
+    ok "donut: $(command -v donut)"
 fi
 
 # ── Build secV Go binary ──────────────────────────────────────────────────────
@@ -305,14 +301,17 @@ if [ -f "$C2_SERVICE" ]; then
 fi
 
 echo ""
-info "Modules and their key dependencies:"
-printf "  %-30s %s\n" "network/netrecon"       "nmap, masscan, arp-scan, scapy, aiohttp"
-printf "  %-30s %s\n" "network/mac_spoof"      "iproute2"
-printf "  %-30s %s\n" "network/wifi_monitor"   "scapy, aiohttp"
-printf "  %-30s %s\n" "network/adsec"          "nmap, smbclient, rpcclient, impacket, ldap3 (+ optional: nxc, kerbrute, bloodhound-python)"
-printf "  %-30s %s\n" "mobile/android_pentest" "adb, apktool, jadx, frida-tools, objection, msfvenom"
-printf "  %-30s %s\n" "mobile/ios_pentest"     "libimobiledevice, frida-tools, objection"
-printf "  %-30s %s\n" "web/webscan"            "requests"
-printf "  %-30s %s\n" "WAN tunneling"          "bore (/usr/local/bin/bore)"
+info "Modules (10 total):"
+printf "  %-32s %s\n" "AD/windows/winadsec"      "impacket, ldap3, zig, donut, xorriso, sliver-client (+ nxc, kerbrute, bloodhound)"
+printf "  %-32s %s\n" "network/adsec"            "impacket, ldap3, smbclient, rpcclient (+ nxc, kerbrute, bloodhound)"
+printf "  %-32s %s\n" "network/netrecon"         "nmap, masscan, arp-scan, scapy, aiohttp"
+printf "  %-32s %s\n" "network/mac_spoof"        "iproute2, psutil"
+printf "  %-32s %s\n" "network/wifi_monitor"     "scapy, aiohttp"
+printf "  %-32s %s\n" "mobile/android_pentest"   "adb, apktool, jadx, frida-tools, objection"
+printf "  %-32s %s\n" "mobile/ios_pentest"       "libimobiledevice, frida-tools, objection"
+printf "  %-32s %s\n" "web/websec"               "requests, beautifulsoup4, dnspython"
+printf "  %-32s %s\n" "web/webscan"              "requests"
+printf "  %-32s %s\n" "ctf/ctfpwn"              "nmap, gobuster, hydra (+ optional: sshpass, node)"
+printf "  %-32s %s\n" "WAN tunneling"            "bore (/usr/local/bin/bore)"
 echo ""
-ok "Installation complete. Run: ./secV"
+ok "Installation complete — run: ./secV"
