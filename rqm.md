@@ -38,6 +38,7 @@ beautifulsoup4>=4.12.0
 shodan>=1.31.0
 geoip2>=4.8.0
 mmh3>=4.1.0
+paramiko>=3.3.0
 
 #pacman
 python

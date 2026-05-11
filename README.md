@@ -241,7 +241,7 @@ Key output fields: `hosts[].ssl_domains` (TLS cert domains), `hosts[].asn/countr
 
 ### `android_pentest` — Android Security Testing
 
-Full-lifecycle Android pentesting suite — from passive recon to active exploitation and persistence. Supports rooted and non-rooted devices, ADB over USB and WiFi, multi-device sweeps, and on-device native agent deployment.
+Full-lifecycle Android pentesting suite — from passive recon to active exploitation and persistence. Supports rooted and non-rooted devices, ADB over USB and WiFi, multi-device sweeps, on-device native agent deployment, and a full web GUI (`set mode gui; run`) that covers all 30+ operations with an embedded C2 dashboard.
 
 | Operation          | Description                                                                       |
 |--------------------|-----------------------------------------------------------------------------------|
@@ -275,6 +275,12 @@ Full-lifecycle Android pentesting suite — from passive recon to active exploit
 | `c2_cli`           | Launch C2 server in CLI mode (no browser)                                         |
 | `full`             | Full recon + vuln_scan + exploit + network + forensics                            |
 
+**Full web GUI** (`tools/mobile/android/android_gui.py`):
+- Launch with `set mode gui; run` or directly: `python3 android_gui.py --port 8897`
+- All 30+ operations in a sidebar — click, configure parameters, run
+- Live SSE terminal with ANSI colours, ADB console, findings panel
+- C2 Dashboard tab: embeds `c2_gui.py` as an iframe, auto-starts it on demand
+
 **On-device agent** (`tools/mobile/android/agent/`):
 - `secv_agent.sh` - shell script, works on any Android without compilation
 - `secv_agent.c` - compiled ARM64 binary (faster, NDK cross-compile via `build.sh`)
@@ -284,12 +290,9 @@ Full-lifecycle Android pentesting suite — from passive recon to active exploit
 - `build_bootbuddy.py` - repackage any APK with BootReceiver + AgentService + DexClassLoader chain, WAN C2 via bore tunnels, QR delivery
 
 **C2 web dashboard** (`tools/mobile/android/c2_gui.py`):
-- Sessions tab: live agent callbacks, interact, run shell commands
-- Bore tab: start/stop WAN tunnels, HTTP file server, full C2 stack
-- MSF tab: Meterpreter sessions via msfrpcd, run commands
-- QR tab: generate delivery QR codes for any URL
-- Operations tab: run any android_pentest operation from the browser
-- Logs tab: encrypted .scv session archives with 5-layer password protection
+- Sessions, Bore tunnels, MSF sessions, QR delivery, Operations, Logs
+- 5-layer encrypted .scv session archives (PBKDF2 + SHA3 + Scrypt + AES-GCM + ChaCha20)
+- Accessible standalone or embedded as a tab inside `android_gui.py`
 
 ```bash
 # Basic recon via agent
@@ -376,6 +379,37 @@ set bore_dex_port 21062   # bore.pub:21062 → HTTP server serving s.dex
 set bore_msf_port 37993   # bore.pub:37993 → MSF handler :4444
 run connected
 ```
+
+---
+
+### `iot_pwn` — IoT and Router Exploitation
+
+Default credential attacks, SNMP brute-force, UPnP exposure, RTSP no-auth detection, and router CVE checks against IoT devices and home/enterprise routers.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `ssh` | `true` | Test SSH default credentials (requires paramiko) |
+| `telnet` | `true` | Test Telnet default credentials |
+| `ftp` | `true` | Test FTP default credentials |
+| `http` | `true` | HTTP admin panel discovery + Basic/Digest credential testing |
+| `snmp` | `true` | SNMP community string brute-force over UDP/161 |
+| `rtsp` | `true` | Check for unauthenticated RTSP stream access |
+| `upnp` | `true` | Check for exposed UPnP SSDP service |
+| `threads` | `20` | Concurrent worker threads |
+| `timeout` | `3.0` | Per-connection timeout (seconds) |
+| `max_creds` | `68` | Max credential pairs to test |
+
+```bash
+use iot_pwn
+run 192.168.1.1
+
+# Quick HTTP + SNMP only
+use iot_pwn
+set ssh false; set telnet false; set ftp false; set rtsp false; set upnp false
+run 192.168.1.1
+```
+
+**Optional deps:** `pip3 install paramiko requests`
 
 ---
 

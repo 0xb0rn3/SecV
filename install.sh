@@ -324,13 +324,14 @@ if [ -f "$C2_SERVICE" ]; then
 fi
 
 echo ""
-info "Modules (9 total):"
+info "Modules (10 total):"
 printf "  %-32s %s\n" "AD/windows/winadsec"      "impacket, ldap3, zig, donut, xorriso (+ nxc, kerbrute, bloodhound)"
 printf "  %-32s %s\n" "AD/linux/adsec"           "impacket, ldap3, smbclient, rpcclient (+ nxc, kerbrute, bloodhound)"
 printf "  %-32s %s\n" "network/netrecon"         "nmap, masscan, arp-scan, scapy, aiohttp"
 printf "  %-32s %s\n" "network/mac_spoof"        "iproute2, psutil, netifaces"
 printf "  %-32s %s\n" "network/wifi_monitor"     "scapy, psutil"
-printf "  %-32s %s\n" "mobile/android_pentest"   "adb, apktool, jadx, frida-tools, objection"
+printf "  %-32s %s\n" "network/iot_pwn"          "nmap, paramiko, requests (+ optional: snmpwalk, hydra)"
+printf "  %-32s %s\n" "mobile/android_pentest"   "adb, apktool, jadx, frida-tools, objection (+ web GUI)"
 printf "  %-32s %s\n" "mobile/ios_pentest"       "libimobiledevice, frida-tools, objection"
 printf "  %-32s %s\n" "web/websec"               "requests, beautifulsoup4, dnspython"
 printf "  %-32s %s\n" "ctf/ctfpwn"              "nmap, gobuster, hydra (+ optional: sshpass, node)"

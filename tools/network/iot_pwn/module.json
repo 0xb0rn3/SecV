@@ -1,0 +1,121 @@
+{
+    "name": "iot_pwn",
+    "version": "1.0.0",
+    "category": "network",
+    "description": "IoT/Router attack module: default credential attacks (SSH/Telnet/FTP/HTTP), SNMP community brute-force, UPnP exposure check, RTSP no-auth detection, HTTP admin panel discovery, router CVE checks",
+    "author": "0xb0rn3 | github.com/0xb0rn3",
+    "executable": "python3 iot_pwn.py",
+    "dependencies": [
+        "python3"
+    ],
+    "optional_dependencies": {
+        "requests": "HTTP admin panel discovery + HTTP Basic/Digest credential attacks - pip3 install requests",
+        "paramiko": "SSH default credential attacks - pip3 install paramiko"
+    },
+    "help": {
+        "description": "IoT and router exploitation module. Tests default credentials across SSH, Telnet, FTP, and HTTP admin panels. Performs SNMP community string brute-force, UPnP SSDP exposure detection, RTSP no-auth checks, and known router CVE probing. Inspired by routersploit toolset features.",
+        "parameters": {
+            "target": {
+                "description": "Target IP address of the IoT device or router",
+                "required": true,
+                "examples": ["192.168.1.1", "10.0.0.1"]
+            },
+            "ssh": {
+                "description": "Test SSH default credentials using paramiko",
+                "default": "true",
+                "options": ["true", "false"]
+            },
+            "telnet": {
+                "description": "Test Telnet default credentials",
+                "default": "true",
+                "options": ["true", "false"]
+            },
+            "ftp": {
+                "description": "Test FTP default credentials",
+                "default": "true",
+                "options": ["true", "false"]
+            },
+            "http": {
+                "description": "Discover HTTP admin panels and test HTTP Basic/Digest default creds",
+                "default": "true",
+                "options": ["true", "false"]
+            },
+            "snmp": {
+                "description": "Brute-force SNMP community strings over UDP/161",
+                "default": "true",
+                "options": ["true", "false"]
+            },
+            "rtsp": {
+                "description": "Check if RTSP stream is accessible without authentication",
+                "default": "true",
+                "options": ["true", "false"]
+            },
+            "upnp": {
+                "description": "Check for exposed UPnP SSDP service",
+                "default": "true",
+                "options": ["true", "false"]
+            },
+            "threads": {
+                "description": "Number of concurrent worker threads",
+                "default": "20"
+            },
+            "timeout": {
+                "description": "Per-connection timeout in seconds",
+                "default": "3.0"
+            },
+            "max_creds": {
+                "description": "Maximum credential pairs to test (all by default)",
+                "default": "68"
+            }
+        },
+        "examples": [
+            {
+                "desc": "Full scan against router",
+                "cmd": "{\"target\":\"192.168.1.1\"}"
+            },
+            {
+                "desc": "Quick HTTP + SNMP only",
+                "cmd": "{\"target\":\"192.168.1.1\",\"params\":{\"ssh\":\"false\",\"telnet\":\"false\",\"ftp\":\"false\",\"rtsp\":\"false\",\"upnp\":\"false\"}}"
+            },
+            {
+                "desc": "Fast scan with limited creds",
+                "cmd": "{\"target\":\"192.168.1.1\",\"params\":{\"max_creds\":\"20\",\"timeout\":\"2\"}}"
+            }
+        ]
+    },
+    "inputs": {
+        "target": "string",
+        "ssh": "bool",
+        "telnet": "bool",
+        "ftp": "bool",
+        "http": "bool",
+        "snmp": "bool",
+        "rtsp": "bool",
+        "upnp": "bool",
+        "threads": "int",
+        "timeout": "float",
+        "max_creds": "int"
+    },
+    "output_structure": {
+        "target": "string",
+        "open_ports": "list[int]",
+        "creds": "dict[service -> list[{user, pass}]]",
+        "snmp": "{valid_communities, sys_info}",
+        "upnp": "{exposed, server, location, type}",
+        "rtsp": "bool",
+        "admin_panels": "list[string]",
+        "http_banners": "dict[port -> {status, server, title}]",
+        "vulnerabilities": "list[{id, desc, severity, cvss, port}]",
+        "summary": "{creds_found, vulns, admin_panels, snmp_exposed, upnp_exposed, rtsp_no_auth}",
+        "scan_duration": "float"
+    },
+    "notes": [
+        "Default credentials list embedded from routersploit + additional IoT vendor defaults",
+        "SSH credential testing requires paramiko: pip3 install paramiko",
+        "HTTP checks require requests: pip3 install requests",
+        "SNMP brute-force uses raw UDP without external tools",
+        "UPnP check uses UDP SSDP M-SEARCH — no nmap required",
+        "All attacks are concurrent via ThreadPoolExecutor",
+        "Stop-on-success per service — stops trying creds once valid pair found"
+    ]
+}

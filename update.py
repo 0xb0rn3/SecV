@@ -50,17 +50,19 @@ INFO = "ℹ"
 
 # --- Version Info Structure ---
 VERSION_INFO = {
-    "current_version": "2.4.2",
+    "current_version": "2.5.0",
     "last_check": None,
     "last_update": None,
     "go_compiled": True,
     "components": {
         "main.go": {"version": "2.4.0", "hash": None},
-        "install.sh": {"version": "2.4.0", "hash": None},
-        "update.py": {"version": "4.1.0", "hash": None},
+        "install.sh": {"version": "2.5.0", "hash": None},
+        "update.py": {"version": "4.2.0", "hash": None},
         "dashboard.py": {"version": "1.0.0", "hash": None},
-        "requirements.txt": {"version": "2.3.0", "hash": None},
-        "secV": {"version": "2.4.0", "hash": None, "type": "binary"}
+        "requirements.txt": {"version": "2.5.0", "hash": None},
+        "secV": {"version": "2.4.0", "hash": None, "type": "binary"},
+        "android_gui.py": {"version": "1.0.0", "hash": None},
+        "iot_pwn.py": {"version": "1.0.0", "hash": None}
     }
 }
 
@@ -888,12 +890,14 @@ def perform_update(current_version: str, new_version: str) -> bool:
         "update.py": SECV_HOME / "update.py",
         "dashboard.py": SECV_HOME / "dashboard.py",
         "requirements.txt": requirements_path,
-        "secV": SECV_BINARY
+        "secV": SECV_BINARY,
+        "android_gui.py": SECV_HOME / "tools/mobile/android/android_gui.py",
+        "iot_pwn.py": SECV_HOME / "tools/network/iot_pwn/iot_pwn.py"
     }
-    
+
     for comp_name, comp_path in components.items():
         VersionManager.update_component_hash(comp_name, comp_path, version_info)
-    
+
     VersionManager.save_version_info(version_info)
     print(f"{GREEN}{CHECK} Version info applied{NC}")
     
@@ -1067,7 +1071,9 @@ def show_component_status():
         "install.sh": SECV_HOME / "install.sh",
         "update.py": SECV_HOME / "update.py",
         "dashboard.py": SECV_HOME / "dashboard.py",
-        "requirements.txt": SECV_HOME / REQUIREMENTS_FILE
+        "requirements.txt": SECV_HOME / REQUIREMENTS_FILE,
+        "android_gui.py": SECV_HOME / "tools/mobile/android/android_gui.py",
+        "iot_pwn.py": SECV_HOME / "tools/network/iot_pwn/iot_pwn.py"
     }
     
     for comp_name, comp_path in components_to_check.items():
@@ -1214,13 +1220,15 @@ def repair_installation():
         "install.sh": SECV_HOME / "install.sh",
         "update.py": SECV_HOME / "update.py",
         "dashboard.py": SECV_HOME / "dashboard.py",
-        "requirements.txt": SECV_HOME / REQUIREMENTS_FILE
+        "requirements.txt": SECV_HOME / REQUIREMENTS_FILE,
+        "android_gui.py": SECV_HOME / "tools/mobile/android/android_gui.py",
+        "iot_pwn.py": SECV_HOME / "tools/network/iot_pwn/iot_pwn.py"
     }
-    
+
     for comp_name, comp_path in components.items():
         if comp_path.exists():
             VersionManager.update_component_hash(comp_name, comp_path, version_info)
-    
+
     version_info["go_compiled"] = SECV_BINARY.exists() and os.access(SECV_BINARY, os.X_OK)
     VersionManager.save_version_info(version_info)
     repaired.append("Version information refreshed")

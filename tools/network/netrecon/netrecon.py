@@ -324,9 +324,7 @@ CVE_DB: Dict[str, List[Dict]] = {
         {'id': 'CVE-2021-33558', 'cvss': 7.5, 'desc': 'Tridium Niagara Fox protocol information disclosure'},
         {'id': 'CVE-2012-3007',  'cvss': 7.8, 'desc': 'Tridium Niagara AX path traversal / arbitrary file read'},
     ],
-    'rtsp': [
-        {'id': 'RTSP-NO-AUTH',   'cvss': 7.5, 'desc': 'RTSP stream accessible without authentication — camera feed exposed'},
-    ],
+    'rtsp': [],
     'coap': [
         {'id': 'COAP-NO-AUTH',   'cvss': 7.5, 'desc': 'CoAP (UDP/5683) has no authentication by default — IoT command injection risk'},
     ],
@@ -1830,6 +1828,7 @@ _PORT_NAMES: Dict[int, str] = {
     5683: 'coap', 5900: 'vnc', 5984: 'couchdb', 6379: 'redis',
     7547: 'tr-069', 8000: 'hikvision-http', 8080: 'http-proxy',
     8291: 'winbox', 8443: 'https-alt', 8883: 'mqtt-tls',
+    5353: 'mdns', 7680: 'wudo', 62078: 'iphone-sync',
     9000: 'http', 9200: 'elasticsearch', 9900: 'nis', 11211: 'memcached',
     20000: 'dnp3', 27017: 'mongodb', 34567: 'dvr-http',
     37777: 'dahua-dvr', 47808: 'bacnet',
@@ -2064,22 +2063,28 @@ class NetRecon:
 
                         elif tag == 'arp' and isinstance(r, dict):
                             for ip, mac in r.items():
-                                if ip not in self.exclude:
+                                if ip not in self.exclude and ip in target_ips:
                                     arp_map[ip] = mac
                                     alive.setdefault(ip, set())
 
                         elif tag == 'nmap_disc' and isinstance(r, set):
                             for ip in r:
-                                if ip not in self.exclude:
+                                if ip not in self.exclude and ip in target_ips:
                                     alive.setdefault(ip, set())
                     except Exception as e:
                         self.errors.append(f'{tag}: {e}')
 
-            # Fallback: pure TCP if nothing found
-            if not alive and not self.passive:
-                print('[*] Falling back to TCP connect scan...', file=sys.stderr)
-                alive = self._tcp_fallback(list(target_ips)[:64])
-                engines.append('tcp_connect')
+            # Fallback: TCP connect for any target IPs not yet discovered
+            if not self.passive:
+                missed = [ip for ip in target_ips if ip not in alive]
+                if missed:
+                    if not alive:
+                        print('[*] Falling back to TCP connect scan...', file=sys.stderr)
+                    fallback = self._tcp_fallback(missed[:64])
+                    if fallback:
+                        alive.update(fallback)
+                    if 'tcp_connect' not in engines:
+                        engines.append('tcp_connect')
 
             if not alive:
                 print('[!] No hosts found — all discovery methods returned empty. Use --passive or check connectivity.',
@@ -2384,11 +2389,11 @@ class NetRecon:
                                 'desc': 'MQTT broker accepts unauthenticated connections — full broker access possible',
                             })
 
-            # RTSP — check if stream is accessible without auth
-            if 554 in open_ports:
-                rtsp = self._probe_rtsp(ip, 554)
+            # RTSP — check if stream is accessible without auth (ports 554, 7000, 8554)
+            for _rtsp_port in sorted(open_ports & {554, 7000, 8554}):
+                rtsp = self._probe_rtsp(ip, _rtsp_port)
                 for svc in profile.services:
-                    if svc.port == 554:
+                    if svc.port == _rtsp_port:
                         if rtsp.get('banner') and not svc.banner:
                             svc.banner = rtsp['banner'][:120]
                         if rtsp.get('server') and not svc.http_server:
@@ -2397,7 +2402,7 @@ class NetRecon:
                             profile.vulnerabilities.append({
                                 'id': 'RTSP-NO-AUTH',
                                 'severity': 'HIGH',
-                                'desc': 'RTSP camera stream is accessible without any authentication',
+                                'desc': f'RTSP stream on port {_rtsp_port} is accessible without authentication',
                             })
 
             # Camera favicon hash fingerprinting — identify model/vendor
@@ -2408,6 +2413,38 @@ class NetRecon:
                         if not profile.device_type:
                             profile.device_type = model
                         break
+
+        # TTL-based OS fallback when nmap OS detection was inconclusive
+        if not profile.os_family:
+            ttl_val = 0
+            # Try ICMP ping first (blocked on Windows by default)
+            try:
+                r = subprocess.run(['ping', '-c', '1', '-W', '1', ip],
+                                   capture_output=True, text=True, timeout=4)
+                for line in r.stdout.split('\n'):
+                    m = re.search(r'ttl=(\d+)', line, re.I)
+                    if m:
+                        ttl_val = int(m.group(1))
+                        break
+            except Exception:
+                pass
+            # Fallback: TCP SYN probe to an open port using scapy
+            if not ttl_val and CAPS['scapy'] and CAPS['root'] and open_ports:
+                try:
+                    probe_port = next(iter(sorted(open_ports)))
+                    pkt = _scapy.IP(dst=ip) / _scapy.TCP(dport=probe_port, flags='S')
+                    ans = _scapy.sr1(pkt, timeout=2, verbose=False)
+                    if ans:
+                        ttl_val = ans.ttl
+                except Exception:
+                    pass
+            if ttl_val:
+                if ttl_val <= 64:
+                    profile.os_family = 'Linux'
+                elif ttl_val <= 128:
+                    profile.os_family = 'Windows'
+                else:
+                    profile.os_family = 'Network Device'
 
         profile.risk_score, profile.risk_level = self._risk(profile)
         return profile
@@ -3050,23 +3087,29 @@ class NetRecon:
                 return False
 
     def _tcp_fallback(self, ips: List[str]) -> Dict[str, Set[int]]:
+        import errno as _errno
         common = [21,22,23,25,53,80,110,143,389,443,445,993,995,
-                  1433,1521,3306,3389,5432,5900,6379,8080,8443,27017]
+                  1433,1521,3306,3389,5432,5900,6379,7680,8080,8443,27017]
         result: Dict[str, Set[int]] = {}
         lock = threading.Lock()
 
         def probe(ip: str):
             found: Set[int] = set()
+            alive = False
             for port in common:
                 try:
                     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     s.settimeout(1.0)
-                    if s.connect_ex((ip, port)) == 0:
-                        found.add(port)
+                    rc = s.connect_ex((ip, port))
                     s.close()
+                    if rc == 0:
+                        found.add(port)
+                        alive = True
+                    elif rc == _errno.ECONNREFUSED:
+                        alive = True  # RST = host is up, port just closed
                 except Exception:
                     pass
-            if found:
+            if alive:
                 with lock:
                     result[ip] = found
 
@@ -3406,7 +3449,7 @@ def _fmt_service(svc: dict, indent: str = '    ') -> List[str]:
     lines = []
     port  = svc.get('port', 0)
     proto = svc.get('protocol', 'tcp')
-    sname = svc.get('service') or ''
+    sname = svc.get('service') or _PORT_NAMES.get(port, '')
     prod  = svc.get('product') or ''
     ver   = svc.get('version') or ''
     banner= svc.get('banner') or ''
@@ -3594,31 +3637,43 @@ def print_report(result: dict) -> None:
         has_svc = [h for h in minimal_hosts if h.get('services')]
 
         if no_svc:
-            print(f'  {_DM}no open ports{_R}')
-            ips = [h['ip'] for h in no_svc]
-            # 5 per row
-            for i in range(0, len(ips), 5):
-                row = ips[i:i+5]
-                print(f'  {_DM}{"  ".join(f"{ip:<17}" for ip in row)}{_R}')
+            has_os = any(h.get('os_family') for h in no_svc)
+            if has_os:
+                for h in no_svc:
+                    print(_fmt_host_line(h))
+            else:
+                print(f'  {_DM}no open ports{_R}')
+                ips = [h['ip'] for h in no_svc]
+                for i in range(0, len(ips), 5):
+                    row = ips[i:i+5]
+                    print(f'  {_DM}{"  ".join(f"{ip:<17}" for ip in row)}{_R}')
             if has_svc:
                 print()
 
         if has_svc:
-            # Group by port pattern
-            by_port: dict = {}
-            for h in has_svc:
-                ports_key = ','.join(str(s['port']) for s in h.get('services', []))
-                by_port.setdefault(ports_key, []).append(h)
-            for ports_key, grp in by_port.items():
-                svcs_desc = ', '.join(
-                    f"{s['port']}/{s.get('protocol','tcp')} {s.get('banner','tcpwrapped')}"
-                    for s in grp[0].get('services', [])
-                )
-                print(f'  {_DM}port {ports_key}  {svcs_desc}{_R}')
-                ips = [h['ip'] for h in grp]
-                for i in range(0, len(ips), 5):
-                    row = ips[i:i+5]
-                    print(f'  {_DM}{"  ".join(f"{ip:<17}" for ip in row)}{_R}')
+            has_os_svc = any(h.get('os_family') for h in has_svc)
+            if has_os_svc:
+                for h in has_svc:
+                    print(_fmt_host_line(h))
+                    for svc in h.get('services', []):
+                        for ln in _fmt_service(svc):
+                            print(ln)
+            else:
+                # Group by port pattern when no OS info available
+                by_port: dict = {}
+                for h in has_svc:
+                    ports_key = ','.join(str(s['port']) for s in h.get('services', []))
+                    by_port.setdefault(ports_key, []).append(h)
+                for ports_key, grp in by_port.items():
+                    svcs_desc = ', '.join(
+                        f"{s['port']}/{s.get('protocol','tcp')} {s.get('banner','tcpwrapped')}"
+                        for s in grp[0].get('services', [])
+                    )
+                    print(f'  {_DM}port {ports_key}  {svcs_desc}{_R}')
+                    ips = [h['ip'] for h in grp]
+                    for i in range(0, len(ips), 5):
+                        row = ips[i:i+5]
+                        print(f'  {_DM}{"  ".join(f"{ip:<17}" for ip in row)}{_R}')
         print()
 
     # ── Footer ───────────────────────────────────────────────────────

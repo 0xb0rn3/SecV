@@ -256,10 +256,10 @@ secV (winadsec) ❯ run 192.168.1.50
 
 ## Mobile
 
-### `android_pentest` v1.0.0
+### `android_pentest` v2.2.0
 **Full-Lifecycle Android Pentesting Suite**
 
-Device recon to active exploitation and persistence. Supports rooted and non-rooted devices, ADB over USB and WiFi, multi-device sweeps, and on-device native agent deployment with TCP+HTTP C2.
+Device recon to active exploitation and persistence. Supports rooted and non-rooted devices, ADB over USB and WiFi, multi-device sweeps, on-device native agent deployment with TCP+HTTP C2, and a full web GUI (`mode=gui`) that covers all 30+ operations with embedded C2 dashboard.
 
 **Parameters:**
 
@@ -279,6 +279,8 @@ Device recon to active exploitation and persistence. Supports rooted and non-roo
 | `record` | boolean | `false` | Record screen during operation |
 | `bore_server` | string | `bore.pub` | Bore relay server hostname — used by `qr_exploit wan` and `wan_expose` bore fallback |
 | `apk_path` | string | — | Explicit APK path to serve in `qr_exploit wan` mode (overrides work_dir glob) |
+| `mode` | string | — | Set to `gui` to launch the full Android Pentest web GUI (`android_gui.py`) at localhost:8897 |
+| `gui_port` | int | `8897` | HTTP port for the GUI server (used with `mode=gui`) |
 
 **Operations:**
 
@@ -314,6 +316,14 @@ Device recon to active exploitation and persistence. Supports rooted and non-roo
 | `c2_cli`           | Launch C2 server in CLI mode                                                       |
 | `full`             | Complete assessment: recon + vuln_scan + exploit + network + forensics             |
 
+**Full Web GUI** (`tools/mobile/android/android_gui.py`):
+- Launch via `set mode gui; run` or `python3 android_gui.py --port 8897`
+- Operations sidebar: all 30+ operations grouped by category, click to configure and launch
+- Live terminal: real-time SSE output stream from every running operation
+- ADB console tab: raw ADB command input, output inline
+- Findings tab: auto-parsed vulnerability cards from JSON output
+- C2 Dashboard tab: embeds `c2_gui.py` as an inline iframe, auto-started on demand
+
 **On-Device Agent** (`tools/mobile/android/agent/`):
 - `secv_agent.sh` - shell script, any Android without compilation
 - `secv_agent.c` - compiled ARM64 binary via NDK (`build.sh`)
@@ -325,6 +335,7 @@ Device recon to active exploitation and persistence. Supports rooted and non-roo
 **C2 Web Dashboard** (`tools/mobile/android/c2_gui.py`):
 - Sessions, Bore tunnels, MSF sessions, QR delivery, Operations, Logs
 - 5-layer encrypted .scv session archives (PBKDF2 + SHA3 + Scrypt + AES-GCM + ChaCha20)
+- Embedded as a tab inside `android_gui.py` (no separate launch needed)
 
 **Quick Start:**
 ```
@@ -382,6 +393,51 @@ run connected
 ```
 
 **Dependencies:** `adb` (system binary — installed by `install.sh`)
+
+---
+
+### `iot_pwn` v1.0.0
+**IoT and Router Exploitation Module**
+
+Tests default credentials across SSH, Telnet, FTP, and HTTP admin panels. Performs SNMP community string brute-force, UPnP SSDP exposure detection, RTSP no-auth checks, and known router CVE probing. Inspired by routersploit toolset capabilities, embedded entirely in Python with no external framework dependency.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `target` | string | — | Target IP address of the IoT device or router |
+| `ssh` | bool | `true` | Test SSH default credentials via paramiko |
+| `telnet` | bool | `true` | Test Telnet default credentials (raw socket, no telnetlib) |
+| `ftp` | bool | `true` | Test FTP default credentials via ftplib |
+| `http` | bool | `true` | Discover HTTP admin panels and test HTTP Basic/Digest creds |
+| `snmp` | bool | `true` | Brute-force SNMP community strings over UDP/161 |
+| `rtsp` | bool | `true` | Check if RTSP stream is accessible without authentication |
+| `upnp` | bool | `true` | Check for exposed UPnP SSDP service |
+| `threads` | int | `20` | Number of concurrent worker threads |
+| `timeout` | float | `3.0` | Per-connection timeout in seconds |
+| `max_creds` | int | `68` | Maximum credential pairs to test |
+
+**Credential coverage:** 68 default credential pairs (routersploit + additional IoT vendor defaults: Huawei, ZTE, TP-Link, D-Link, Zyxel, Netgear, Cisco, Ubiquiti, Dahua, Hikvision, and more).
+
+**CVE checks:** Huawei HG532 (CVE-2017-17215), Zyxel hardcoded backdoor (CVE-2020-29583), Arcadyan arbitrary command execution (CVE-2021-20090), D-Link authentication bypass (CVE-2019-16920).
+
+**Quick Start:**
+```
+secV ❯ use iot_pwn
+secV (iot_pwn) ❯ run 192.168.1.1
+
+# HTTP + SNMP only (skip SSH/Telnet/FTP)
+secV (iot_pwn) ❯ set ssh false
+secV (iot_pwn) ❯ set telnet false
+secV (iot_pwn) ❯ set ftp false
+secV (iot_pwn) ❯ set rtsp false
+secV (iot_pwn) ❯ set upnp false
+secV (iot_pwn) ❯ run 192.168.1.1
+```
+
+**Optional dependencies:**
+- `paramiko` — SSH credential testing: `pip3 install paramiko`
+- `requests` — HTTP admin panel discovery + credential testing: `pip3 install requests`
 
 ---
 

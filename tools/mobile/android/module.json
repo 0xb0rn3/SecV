@@ -812,6 +812,16 @@
       "required": false,
       "default": ""
     },
+    "mode": {
+      "type": "string",
+      "default": "",
+      "description": "Set to 'gui' to launch the full Android Pentest web GUI (all operations) at http://localhost:8897"
+    },
+    "gui_port": {
+      "type": "int",
+      "default": 8897,
+      "description": "Port for the full GUI server (mode=gui)"
+    },
     "c2_gui": {
       "type": "bool",
       "default": false,
