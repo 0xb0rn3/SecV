@@ -50,7 +50,7 @@ INFO = "ℹ"
 
 # --- Version Info Structure ---
 VERSION_INFO = {
-    "current_version": "2.4.0",
+    "current_version": "2.4.2",
     "last_check": None,
     "last_update": None,
     "go_compiled": True,
