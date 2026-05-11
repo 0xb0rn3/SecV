@@ -3553,6 +3553,9 @@ def print_report(result: dict) -> None:
         print(_rule('HIGH RISK ▲', W))
         for h in sorted(high_hosts, key=lambda x: -x.get('risk_score', 0)):
             print(_fmt_host_line(h))
+            ssl_d = h.get('ssl_domains', [])
+            if ssl_d:
+                print(f'    {_DM}ssl      {_R}{_CY}{", ".join(ssl_d[:6])}{_R}')
             for svc in h.get('services', []):
                 for ln in _fmt_service(svc):
                     print(ln)
@@ -3569,6 +3572,9 @@ def print_report(result: dict) -> None:
         print(_rule(f'HOSTS ({len(regular_hosts)})', W))
         for h in sorted(regular_hosts, key=lambda x: -x.get('risk_score', 0)):
             print(_fmt_host_line(h))
+            ssl_d = h.get('ssl_domains', [])
+            if ssl_d:
+                print(f'    {_DM}ssl      {_R}{_CY}{", ".join(ssl_d[:6])}{_R}')
             for svc in h.get('services', []):
                 for ln in _fmt_service(svc):
                     print(ln)
@@ -3617,8 +3623,10 @@ def print_report(result: dict) -> None:
 
     # ── Footer ───────────────────────────────────────────────────────
     print(_DM + '─' * W + _R)
+    n_ssl = sum(len(h.get('ssl_domains', [])) for h in hosts)
     vuln_foot = f'{n_crit+n_high} high-sev CVEs' if (n_crit + n_high) else 'no high-sev CVEs'
-    print(f'  {_GR}✓{_R}  {n_alive} hosts  ·  {n_ports} ports  ·  {_YL}{n_vuln} CVEs{_R}  ·  {vuln_foot}')
+    ssl_foot  = f'  ·  {_CY}{n_ssl} ssl domains{_R}' if n_ssl else ''
+    print(f'  {_GR}✓{_R}  {n_alive} hosts  ·  {n_ports} ports  ·  {_YL}{n_vuln} CVEs{_R}  ·  {vuln_foot}{ssl_foot}')
     if hi_risk:
         print(f'  {_RD}▲  high-risk:{_R} {", ".join(hi_risk)}')
     print()

@@ -23,14 +23,14 @@ Complete reference of all SecV security modules.
 ### `netrecon` v1.0.0
 **Concurrent Multi-Engine Network Profiler**
 
-Runs nmap, masscan, rustscan, arp-scan, and Shodan simultaneously, merges results, and correlates CVEs against detected service versions via live NVD lookups. Detects iOS/Apple devices (port 62078, mDNS). Supports passive-only mode, proxy chains, and evasion techniques.
+Runs nmap, masscan, rustscan, arp-scan, and Shodan simultaneously, merges results, and correlates CVEs against detected service versions via live NVD lookups. Detects iOS/Apple devices (port 62078, mDNS). Extracts SSL cert domains (CN+SANs). Supports country/ASN-based targeting, GeoIP2 local DB, passive-only mode, proxy chains, and evasion techniques.
 
 **Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `mode` | string | `normal` | Scan mode: `normal`, `quick`, `deep`, `network`, `stealth` |
-| `ports` | string | `top-1000` | Port range or preset: `top-100`, `top-1000`, `web`, `db`, `all` |
+| `mode` | string | `normal` | Scan mode: `normal`, `quick`, `deep`, `stealth`, `evasion`, `full` |
+| `ports` | string | `top-1000` | Port range or preset: `top-100`, `top-1000`, `web`, `db`, `iot`, `camera`, `ics`, `all` |
 | `threads` | integer | `20` | Concurrent scanning threads |
 | `rate` | integer | `1000` | Packets/sec (masscan) |
 | `timeout` | integer | `5` | Per-host timeout (seconds) |
@@ -40,18 +40,51 @@ Runs nmap, masscan, rustscan, arp-scan, and Shodan simultaneously, merges result
 | `interface` | string | — | Network interface to bind |
 | `exclude` | string | — | Comma-separated hosts/CIDRs to skip |
 | `passive_only` | boolean | `false` | No active probing — Shodan/DNS only |
+| `max_hosts` | integer | `1024` | Max IPs sampled from `country:`/`asn:` targets |
+| `evasion` | boolean | `false` | Enable IDS/FW bypass (frags, decoys, source-port spoof) |
+| `proxychains` | boolean | `false` | Wrap nmap through proxychains4 |
+| `web_enum` | boolean | `false` | Run gobuster/ffuf on discovered web ports |
+| `output_dir` | string | — | Save HTML report, nmap XML, MSF RC to this directory |
+
+**Target formats:**
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| Single IP | `run 192.168.1.1` | Direct host scan |
+| CIDR | `run 192.168.1.0/24` | Network range |
+| Range | `run 192.168.1.1-50` | IP range |
+| Hostname | `run example.com` | Resolved via DNS |
+| Multi | `run 10.0.0.1,10.0.0.5` | Comma-separated |
+| Country | `run country:de` | All German CIDRs (ipdeny.com) |
+| ASN | `run asn:AS15169` | All prefixes for an ASN (RIPE stat) |
+
+**Output fields:**
+- `hosts[]` — per-host: IP, hostname, OS, MAC, services, ASN, country, risk score
+- `ssl_domains[]` — CN + SANs from TLS certs on each host (CDN noise filtered)
+- `vulnerabilities[]` — host-level findings (SNMP defaults, MQTT no-auth, RTSP no-auth, ICS exposure)
+- `summary{}` — totals, OS distribution, risk breakdown, high-risk hosts
+- `outputs{}` — paths to HTML report, nmap XML, MSF RC file (when `output_dir` set)
 
 **Optional feature availability:**
-- Without optional deps: TCP connect, DNS, WHOIS, ASN lookup
-- With scapy/nmap: + SYN scan, Nmap integration
-- With Shodan API key: + Shodan enrichment, live NVD CVE correlation
+- Minimum (stdlib): TCP connect, DNS, WHOIS, ASN lookup (ipinfo.io)
+- `+nmap`: Service/OS detection, NSE scripts
+- `+masscan`: Fast SYN port discovery (root required)
+- `+cryptography`: Full SSL SAN extraction (`pip3 install cryptography`)
+- `+geoip2 +GeoLite2-*.mmdb`: Offline ASN/country lookup, no rate limits (`pip3 install geoip2`)
+- `+shodan key`: External threat intelligence
+- `+mmh3`: Camera favicon fingerprinting (17 camera models)
 
 **Quick Start:**
 ```
 secV ❯ use netrecon
-secV (netrecon) ❯ set mode network
-secV (netrecon) ❯ set ports top-100
+secV (netrecon) ❯ set mode normal
+secV (netrecon) ❯ set ports top-1000
 secV (netrecon) ❯ run 192.168.1.0/24
+
+secV (netrecon) ❯ set max_hosts 500
+secV (netrecon) ❯ run country:de
+
+secV (netrecon) ❯ run asn:AS15169
 ```
 
 ---

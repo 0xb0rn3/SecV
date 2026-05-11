@@ -63,7 +63,7 @@ pip3 install requests beautifulsoup4 dnspython scapy psutil netifaces frida-tool
 
 | Module | System packages | Python packages |
 |--------|----------------|-----------------|
-| `netrecon` | `nmap`, `masscan`, `rustscan`¹, `arp-scan` | `requests`, `scapy`, `shodan` |
+| `netrecon` | `nmap`, `masscan`, `rustscan`¹, `arp-scan` | `requests`, `scapy`, `shodan`, `cryptography`, `geoip2`, `mmh3` |
 | `android_pentest` | `adb`, `apktool`, `msfvenom`, `qrencode`, `nodejs`, `bore`², `cloudflared`³ | `frida-tools`, `objection`, `flask`, `websockets`, `cryptography` |
 | `ctfpwn` | `nmap`, `gobuster`, `sshpass`, `hydra`, `nodejs` | — |
 | `websec` | `ffuf`⁴, `gobuster`, `msfvenom` (for msf_payload), `tor` (optional) | `requests`, `beautifulsoup4`, `dnspython` |
@@ -226,14 +226,16 @@ Drop your module into `tools/<category>/<name>/` and run `reload`.
 
 ### `netrecon` — Network Reconnaissance
 
-Concurrent multi-engine network profiling. Runs nmap, masscan, rustscan, and arp-scan simultaneously, merges results, and correlates CVEs against detected services. Detects iOS/Apple devices via port 62078 (lockdownd) and mDNS.
+Concurrent multi-engine network profiling. Runs nmap, masscan, rustscan, and arp-scan simultaneously, merges results, and correlates CVEs against detected services. Detects iOS/Apple devices via port 62078 (lockdownd) and mDNS. Extracts SSL cert domains (CN+SANs) from TLS ports. Supports country/ASN-based targeting and offline GeoIP2 lookup.
 
 ```bash
-use netrecon
-set mode network
-set ports top-100
-run 192.168.1.0/24
+use netrecon; set mode normal; run 192.168.1.0/24
+use netrecon; set max_hosts 500; run country:de     # all German CIDRs
+use netrecon; set max_hosts 200; run asn:AS15169    # Google ASN prefixes
+use netrecon; set mode deep; set output_dir /tmp/scan; run 10.0.0.1
 ```
+
+Key output fields: `hosts[].ssl_domains` (TLS cert domains), `hosts[].asn/country` (MaxMind GeoIP2 or ipinfo.io), `outputs.html_report` (self-contained HTML — no xsltproc needed).
 
 ---
 

@@ -187,6 +187,25 @@ sudo secV
 sudo ./secV
 ```
 
+### Optional: MaxMind GeoIP2 (offline ASN/country lookup)
+
+`netrecon` uses ipinfo.io for ASN/country by default. For offline, unlimited lookups, place free [GeoLite2](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data) databases at any of these paths:
+
+```
+~/.secv/GeoLite2-ASN.mmdb      ← ASN + org lookup
+~/.secv/GeoLite2-City.mmdb     ← country + city lookup
+/var/lib/secv/GeoLite2-ASN.mmdb
+/usr/share/GeoIP/GeoLite2-ASN.mmdb
+```
+
+```bash
+pip3 install geoip2 --break-system-packages
+# Download DBs from: https://dev.maxmind.com/geoip/geolite2-free-geolocation-data
+# (free account required)
+mkdir -p ~/.secv
+mv GeoLite2-ASN.mmdb GeoLite2-City.mmdb ~/.secv/
+```
+
 ---
 
 ## Updating
