@@ -24,6 +24,7 @@ from typing import Dict, List, Optional, Tuple, Set, Any
 from dataclasses import dataclass, asdict, field
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import xml.etree.ElementTree as ET
+import ssl
 
 # NVD real-time CVE enrichment (optional)
 _NVD_AVAILABLE = False
@@ -112,6 +113,19 @@ try:
     CAPS['impacket'] = True
 except ImportError:
     CAPS['impacket'] = False
+
+try:
+    from cryptography import x509 as _x509_mod
+    from cryptography.hazmat.backends import default_backend as _crypto_backend
+    CAPS['cryptography'] = True
+except ImportError:
+    CAPS['cryptography'] = False
+
+try:
+    import geoip2.database as _geoip2_mod
+    CAPS['geoip2'] = True
+except ImportError:
+    CAPS['geoip2'] = False
 
 # ============================================================================
 # OUI VENDOR DATABASE
@@ -528,6 +542,7 @@ class HostProfile:
     risk_level: str = 'LOW'
     scan_sources: List[str] = field(default_factory=list)
     ad_info: Dict = field(default_factory=dict)
+    ssl_domains: List[str] = field(default_factory=list)  # CN + SANs extracted from TLS certs
 
 # ============================================================================
 # NMAP RUNNER
@@ -1262,6 +1277,40 @@ class PassiveRecon:
                 return result
         except Exception:
             pass
+        # MaxMind GeoIP2 local DBs — no rate limits, works offline
+        if CAPS['geoip2']:
+            _asn_dbs = [
+                os.path.join(os.path.expanduser('~'), '.secv', 'GeoLite2-ASN.mmdb'),
+                '/var/lib/secv/GeoLite2-ASN.mmdb',
+                '/usr/share/GeoIP/GeoLite2-ASN.mmdb',
+            ]
+            for _db in _asn_dbs:
+                if os.path.exists(_db):
+                    try:
+                        with _geoip2_mod.Reader(_db) as _r:
+                            _a = _r.asn(ip)
+                            result['asn'] = f'AS{_a.autonomous_system_number}'
+                            result['org'] = _a.autonomous_system_organization or ''
+                    except Exception:
+                        pass
+                    break
+            _city_dbs = [
+                os.path.join(os.path.expanduser('~'), '.secv', 'GeoLite2-City.mmdb'),
+                '/var/lib/secv/GeoLite2-City.mmdb',
+                '/usr/share/GeoIP/GeoLite2-City.mmdb',
+            ]
+            for _db in _city_dbs:
+                if os.path.exists(_db):
+                    try:
+                        with _geoip2_mod.Reader(_db) as _r:
+                            _c = _r.city(ip)
+                            result['country'] = _c.country.iso_code or ''
+                            result['city'] = _c.city.name or ''
+                    except Exception:
+                        pass
+                    break
+            if result['asn']:
+                return result
         if not CAPS['requests']:
             return result
         try:
@@ -1297,6 +1346,99 @@ class PassiveRecon:
         except Exception:
             pass
         return ''
+
+    @staticmethod
+    def ssl_cert_probe(ip: str, port: int, timeout: float = 5.0) -> List[str]:
+        """Extract CN + SANs from an SSL/TLS cert. Returns deduplicated domain list."""
+        domains: List[str] = []
+        try:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            if CAPS['cryptography']:
+                ctx.verify_mode = ssl.CERT_NONE
+                with socket.create_connection((ip, port), timeout=timeout) as raw:
+                    with ctx.wrap_socket(raw, server_hostname=ip) as ssock:
+                        der = ssock.getpeercert(binary_form=True)
+                if der:
+                    cert = _x509_mod.load_der_x509_certificate(der, _crypto_backend())
+                    from cryptography.x509.oid import NameOID as _NameOID
+                    for attr in cert.subject:
+                        if attr.oid == _NameOID.COMMON_NAME:
+                            domains.append(attr.value)
+                    try:
+                        san = cert.extensions.get_extension_for_class(
+                            _x509_mod.SubjectAlternativeName)
+                        domains.extend(san.value.get_values_for_type(_x509_mod.DNSName))
+                    except Exception:
+                        pass
+            else:
+                ctx.verify_mode = ssl.CERT_OPTIONAL
+                with socket.create_connection((ip, port), timeout=timeout) as raw:
+                    with ctx.wrap_socket(raw, server_hostname=ip) as ssock:
+                        cert_dict = ssock.getpeercert()
+                if cert_dict:
+                    for rdn in cert_dict.get('subject', []):
+                        for k, v in rdn:
+                            if k == 'commonName':
+                                domains.append(v)
+                    for san_type, san_val in cert_dict.get('subjectAltName', []):
+                        if san_type == 'DNS':
+                            domains.append(san_val)
+        except Exception:
+            pass
+        return list(dict.fromkeys(domains))
+
+    @staticmethod
+    def _clean_domains(domains: List[str]) -> List[str]:
+        """Strip wildcards; drop CDN noise, hash hostnames, bare labels."""
+        _CDN = re.compile(
+            r'(cloudfront\.net|akamai(edge|ized)?\.net|fastly\.net|'
+            r'cloudflare\.net|amazonaws\.com|azure(websites|fd)\.net|'
+            r'msedge\.net|trafficmanager\.net)$', re.IGNORECASE)
+        _HASH = re.compile(r'^[0-9a-f]{10,}\.', re.IGNORECASE)
+        out: List[str] = []
+        seen: set = set()
+        for d in domains:
+            d = d.strip().lstrip('*').lstrip('.')
+            if not d or d in seen or '.' not in d:
+                continue
+            if _CDN.search(d) or _HASH.match(d):
+                continue
+            seen.add(d)
+            out.append(d)
+        return out
+
+
+def _fetch_country_cidrs(cc: str) -> List[str]:
+    """Fetch per-country CIDR blocks from ipdeny.com"""
+    if not CAPS['requests']:
+        return []
+    try:
+        import requests as _req
+        url = f'https://www.ipdeny.com/ipblocks/data/countries/{cc.lower()}.zone'
+        resp = _req.get(url, timeout=10, headers={'User-Agent': 'SecV/1.0'})
+        if resp.status_code == 200:
+            return [ln.strip() for ln in resp.text.splitlines() if ln.strip()]
+    except Exception:
+        pass
+    return []
+
+
+def _fetch_asn_prefixes(asn: str) -> List[str]:
+    """Fetch announced prefixes for an ASN via RIPE stat API"""
+    if not CAPS['requests']:
+        return []
+    try:
+        import requests as _req
+        url = f'https://stat.ripe.net/data/announced-prefixes/data.json?resource={asn}'
+        resp = _req.get(url, timeout=15, headers={'User-Agent': 'SecV/1.0'})
+        if resp.status_code == 200:
+            data = resp.json()
+            return [p['prefix'] for p in data.get('data', {}).get('prefixes', [])
+                    if p.get('prefix')]
+    except Exception:
+        pass
+    return []
 
 
 # ============================================================================
@@ -1704,7 +1846,7 @@ _NAS_PORTS    = {5000, 5001, 9000}
 _ICS_PORTS    = {502, 20000, 102, 47808, 1911}
 _DEVICE_PORTS = _IOT_PORTS | _CAMERA_PORTS | _ROUTER_PORTS | _NAS_PORTS | _ICS_PORTS
 
-# Camera identification — favicon mmh3 hashes (from Shodan research + Vader)
+# Camera identification — favicon mmh3 hashes (from Shodan research + Vader + Maul)
 CAMERA_FAVICON_HASHES: Dict[int, str] = {
     -256948040:  'Axis Camera',
     -808923751:  'Hikvision',
@@ -1802,6 +1944,7 @@ class NetRecon:
         self.web_wordlist  = self.params.get('web_wordlist', '')
         self.do_searchsploit = self._bool(self.params.get('searchsploit', False))
         self.output_dir    = self.params.get('output_dir', '')
+        self.max_hosts     = int(self.params.get('max_hosts', 1024))
 
         # Union all mode feature flags — each mode layer stacks onto the others
         # 'full' = all features: deep + stealth + evasion
@@ -2101,6 +2244,17 @@ class NetRecon:
                                 svc.http_technologies.append(tech)
                         if 'whatweb' not in svc.sources:
                             svc.sources.append('whatweb')
+
+        # SSL cert domain extraction — CN + SANs, Maul-style noise filtering
+        if not self.passive:
+            for _sport in sorted(open_ports & {443, 8443, 9443, 465, 636, 993, 995})[:3]:
+                _raw = PassiveRecon.ssl_cert_probe(ip, _sport, timeout=5.0)
+                _clean = PassiveRecon._clean_domains(_raw)
+                for _d in _clean:
+                    if _d not in profile.ssl_domains:
+                        profile.ssl_domains.append(_d)
+                if profile.ssl_domains:
+                    break
 
         # AD probes — run when DC signature ports are open
         if _DC_SIGNATURE_PORTS.issubset(open_ports) and not self.passive:
@@ -2753,15 +2907,13 @@ class NetRecon:
                     xml_file = base + '.xml'
                     artifacts['nmap_xml'] = xml_file
 
-                    # HTML report via xsltproc
+                    # xsltproc fallback for nmap XML → basic HTML
                     if CAPS.get('xsltproc') and Path(xml_file).is_file():
-                        html_file = base + '.html'
+                        xsl_html = base + '_nmap.html'
                         subprocess.run(
-                            ['xsltproc', xml_file, '-o', html_file],
+                            ['xsltproc', xml_file, '-o', xsl_html],
                             capture_output=True, timeout=30,
                         )
-                        if Path(html_file).is_file():
-                            artifacts['html_report'] = html_file
 
                     # Searchsploit on the XML
                     if self.do_searchsploit and CAPS.get('searchsploit'):
@@ -2798,6 +2950,15 @@ class NetRecon:
             f.write('# set ExitOnSession false\n# exploit -j\n')
         artifacts['msf_rc'] = rc_file
 
+        # Custom HTML report — full profile data including SSL domains, ASN, risk
+        html_file = base + '.html'
+        try:
+            with open(html_file, 'w', encoding='utf-8') as f:
+                f.write(_render_html_report(profiles, target_str, ts))
+            artifacts['html_report'] = html_file
+        except Exception as e:
+            self.errors.append(f'html_report: {e}')
+
         return artifacts
 
     # ------------------------------------------------------------------
@@ -2805,6 +2966,46 @@ class NetRecon:
     def _parse_target(self, target: str) -> Tuple[Set[str], str]:
         ips: Set[str] = set()
         target = target.strip()
+
+        # country:XX — fetch CIDRs from ipdeny.com, sample one IP per CIDR
+        cm = re.match(r'^country:([a-z]{2})$', target, re.IGNORECASE)
+        if cm:
+            cc = cm.group(1).lower()
+            cidrs = _fetch_country_cidrs(cc)
+            if not cidrs:
+                self.errors.append(f'No CIDRs found for country: {cc.upper()}')
+                return ips, target
+            for cidr in cidrs:
+                try:
+                    net = ipaddress.ip_network(cidr, strict=False)
+                    first = str(next(iter(net.hosts())))
+                    ips.add(first)
+                    if len(ips) >= self.max_hosts:
+                        break
+                except Exception:
+                    pass
+            return ips, ','.join(cidrs[:500])
+
+        # asn:AS12345 — fetch announced prefixes via RIPE stat API
+        am = re.match(r'^asn?:?(AS?\d+)$', target, re.IGNORECASE)
+        if am:
+            asn = am.group(1).upper()
+            if not asn.startswith('AS'):
+                asn = 'AS' + asn
+            prefixes = _fetch_asn_prefixes(asn)
+            if not prefixes:
+                self.errors.append(f'No prefixes found for ASN: {asn}')
+                return ips, target
+            for cidr in prefixes:
+                try:
+                    net = ipaddress.ip_network(cidr, strict=False)
+                    first = str(next(iter(net.hosts())))
+                    ips.add(first)
+                    if len(ips) >= self.max_hosts:
+                        break
+                except Exception:
+                    pass
+            return ips, ','.join(prefixes[:500])
 
         if ',' in target:
             for t in target.split(','):
@@ -2897,6 +3098,98 @@ class NetRecon:
 
 
 # ============================================================================
+# HTML REPORT RENDERER
+# ============================================================================
+
+def _render_html_report(profiles: 'List[HostProfile]', target_str: str, ts: str) -> str:
+    _RISK_COLOR = {'LOW': '#27ae60', 'MEDIUM': '#f39c12', 'HIGH': '#e67e22', 'CRITICAL': '#c0392b'}
+
+    def esc(s: str) -> str:
+        return str(s).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+
+    rows = []
+    for h in profiles:
+        rc = _RISK_COLOR.get(h.risk_level, '#888')
+        svcs = ', '.join(f'{s.port}/{s.service or "?"}' for s in sorted(h.services, key=lambda x: x.port)[:12])
+        ssl  = ', '.join(esc(d) for d in h.ssl_domains[:8]) or '—'
+        rows.append(f'''
+  <tr>
+    <td><b>{esc(h.ip)}</b><br><small>{esc(h.hostname or h.reverse_dns or '')}</small></td>
+    <td>{esc(h.os_family or '?')} {esc(h.os_version or '')}</td>
+    <td>{esc(h.asn or '')} {esc(h.asn_org or '')}<br><small>{esc(h.country or '')} {esc(h.city or '')}</small></td>
+    <td><small>{esc(svcs) or '—'}</small></td>
+    <td><small>{ssl}</small></td>
+    <td>{esc(h.device_category or '')} {esc(h.device_type or '')}</td>
+    <td style="color:{rc};font-weight:bold">{esc(h.risk_level)} ({h.risk_score})</td>
+  </tr>''')
+
+    vuln_rows = []
+    for h in profiles:
+        for v in h.vulnerabilities:
+            vc = _RISK_COLOR.get(v.get('severity', ''), '#888')
+            vuln_rows.append(f'''
+  <tr>
+    <td>{esc(h.ip)}</td>
+    <td style="color:{vc};font-weight:bold">{esc(v.get("severity",""))}</td>
+    <td>{esc(v.get("id",""))}</td>
+    <td>{esc(v.get("desc",""))}</td>
+  </tr>''')
+
+    total_ports = sum(len(h.services) for h in profiles)
+    high_risk   = sum(1 for h in profiles if h.risk_level in ('HIGH', 'CRITICAL'))
+
+    return f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NetRecon Report — {esc(target_str)}</title>
+<style>
+  body{{font-family:monospace;background:#0d1117;color:#c9d1d9;margin:0;padding:20px}}
+  h1,h2{{color:#58a6ff}} a{{color:#58a6ff}}
+  .summary{{display:flex;gap:20px;flex-wrap:wrap;margin:16px 0}}
+  .stat{{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:14px 20px;min-width:120px}}
+  .stat .val{{font-size:2em;font-weight:bold;color:#58a6ff}}
+  .stat .lbl{{font-size:.75em;color:#8b949e;margin-top:4px}}
+  table{{width:100%;border-collapse:collapse;margin:16px 0;font-size:.82em}}
+  th{{background:#161b22;color:#8b949e;padding:8px 10px;text-align:left;border-bottom:2px solid #30363d}}
+  td{{padding:7px 10px;border-bottom:1px solid #21262d;vertical-align:top}}
+  tr:hover td{{background:#161b22}}
+  small{{color:#8b949e}}
+  .badge{{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.75em}}
+</style>
+</head>
+<body>
+<h1>&#x1F4E1; NetRecon Report</h1>
+<p><b>Target:</b> {esc(target_str)} &nbsp;|&nbsp; <b>Scan time:</b> {esc(ts[:4])}-{esc(ts[4:6])}-{esc(ts[6:8])} {esc(ts[9:11])}:{esc(ts[11:13])}:{esc(ts[13:15])}</p>
+
+<div class="summary">
+  <div class="stat"><div class="val">{len(profiles)}</div><div class="lbl">Hosts alive</div></div>
+  <div class="stat"><div class="val">{total_ports}</div><div class="lbl">Open ports</div></div>
+  <div class="stat"><div class="val">{high_risk}</div><div class="lbl">High / Critical</div></div>
+  <div class="stat"><div class="val">{sum(len(h.ssl_domains) for h in profiles)}</div><div class="lbl">SSL domains found</div></div>
+  <div class="stat"><div class="val">{sum(len(h.vulnerabilities) for h in profiles)}</div><div class="lbl">Vulnerabilities</div></div>
+</div>
+
+<h2>Host Profiles</h2>
+<table>
+  <tr>
+    <th>IP / Hostname</th><th>OS</th><th>ASN / Country</th>
+    <th>Open Ports</th><th>SSL Domains</th><th>Device</th><th>Risk</th>
+  </tr>
+  {"".join(rows) or "<tr><td colspan='7' style='color:#8b949e'>No hosts profiled.</td></tr>"}
+</table>
+
+{"<h2>Vulnerabilities</h2><table><tr><th>IP</th><th>Severity</th><th>ID</th><th>Description</th></tr>" + "".join(vuln_rows) + "</table>" if vuln_rows else ""}
+
+<p style="color:#8b949e;font-size:.75em;margin-top:40px">
+Generated by <b>SecV netrecon</b> — for authorized security testing only.
+</p>
+</body>
+</html>'''
+
+
+# ============================================================================
 # HELP
 # ============================================================================
 
@@ -2961,6 +3254,7 @@ PARAMETERS:
   interface       NIC for ARP scan
   exclude         Comma-separated IPs to skip
   passive_only    DNS/WHOIS/Shodan only, no active scan
+  max_hosts       Max representative IPs for country/ASN scans (default: 1024)
 
 EVASION / ANONYMITY:
   evasion         true | false — enable all IDS/FW bypass flags  (default: false)
@@ -2982,6 +3276,8 @@ TARGETS:
   192.168.1.1-50       IP range
   example.com          Hostname (resolved)
   10.0.0.1,10.0.0.2    Multiple targets
+  country:de           All CIDRs for a country (ipdeny.com) — e.g. country:us, country:cn
+  asn:AS15169          All prefixes announced by an ASN (RIPE stat API)
 
 EXAMPLES:
   use netrecon; set mode normal; run 192.168.1.0/24
@@ -2994,6 +3290,8 @@ EXAMPLES:
   use netrecon; set ports camera; run 192.168.1.0/24  # IP camera sweep (RTSP, Hikvision, Dahua)
   use netrecon; set ports ics; run 10.0.0.0/24        # ICS/SCADA sweep (Modbus, DNP3, BACnet, S7)
   use netrecon; set ports device; run 192.168.1.0/24  # Full device sweep (all IoT categories)
+  use netrecon; set max_hosts 500; run country:de     # Sample 500 German hosts
+  use netrecon; set max_hosts 200; run asn:AS15169    # Sample 200 hosts from Google ASN
 
 OUTPUT (JSON):
   hosts[]         Per-host: IP, MAC, vendor, hostname, OS, services, risk
@@ -3002,14 +3300,23 @@ OUTPUT (JSON):
   services[]      Per-service: port, service, version, banner, HTTP title,
                   technologies (whatweb), web_paths (gobuster), TLS, CVEs
                   mqtt_no_auth, snmp_community, smb_shares (when applicable)
+  ssl_domains[]   CN + SANs extracted from TLS certs (CDN noise filtered)
   vulnerabilities[] Host-level findings: ICS exposure, MQTT no-auth, RTSP no-auth, SNMP defaults
   shodan{}        Shodan data per host (vulns, ports, tags, org)
   dns_records{}   Forward/reverse/MX/NS/TXT
-  asn/country     ASN, org, country, city
+  asn/country     ASN, org, country, city (MaxMind GeoIP2 if DB present, else ipinfo.io)
   risk_score      0-100 per host with level: LOW/MEDIUM/HIGH/CRITICAL
                   ICS hosts get +40 base score, cameras +15
   summary{}       Total hosts, services, OS dist, CVE stats, high-risk hosts
-  outputs{}       Paths to: html_report, nmap_xml, msf_rc, searchsploit results
+  outputs{}       Paths to: html_report (custom), nmap_xml, msf_rc, searchsploit results
+
+GEOIP2 LOCAL DB (optional — no rate limits, works offline):
+  Place MaxMind GeoLite2 DBs at any of these paths:
+    ~/.secv/GeoLite2-ASN.mmdb      (ASN + org)
+    ~/.secv/GeoLite2-City.mmdb     (country + city)
+    /var/lib/secv/GeoLite2-*.mmdb  (system install)
+    /usr/share/GeoIP/GeoLite2-*.mmdb
+  Download free: https://dev.maxmind.com/geoip/geolite2-free-geolocation-data
 
 REQUIREMENTS:
   Minimum:  Python 3.8+ (TCP connect fallback always works)
@@ -3017,8 +3324,10 @@ REQUIREMENTS:
   Full:     masscan nmap arp-scan whatweb gobuster   [+ run as root for SYN scan]
   Evasion:  proxychains4 + configured proxy chain
   IoT/Cam:  pip3 install mmh3   (favicon hash fingerprinting, optional)
-  Full:     + pip3 install scapy dnspython requests shodan mmh3
+  Full:     + pip3 install scapy dnspython requests shodan mmh3 cryptography geoip2
             + apt install ffuf searchsploit gobuster whatweb xsltproc
+  SSL/TLS:  pip3 install cryptography   (CN+SAN extraction from certs)
+  GeoIP2:   pip3 install geoip2         (local MaxMind DB, no API key needed)
 """)
 
 

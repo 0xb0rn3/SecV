@@ -9,15 +9,18 @@
   "dependencies": ["python3"],
 
   "optional_dependencies": {
-    "nmap":       "Service/OS detection - apt install nmap",
-    "masscan":    "Ultra-fast discovery (root) - apt install masscan",
-    "rustscan":   "Fast port discovery - cargo install rustscan",
-    "arp-scan":   "Local MAC discovery (root) - apt install arp-scan",
-    "whois":      "WHOIS org lookup - apt install whois",
-    "scapy":      "ARP/ICMP probes - pip3 install scapy",
-    "requests":   "HTTP analysis + ASN lookup - pip3 install requests",
-    "dnspython":  "Full DNS enumeration - pip3 install dnspython",
-    "shodan":     "Shodan API enrichment - pip3 install shodan"
+    "nmap":         "Service/OS detection - apt install nmap",
+    "masscan":      "Ultra-fast discovery (root) - apt install masscan",
+    "rustscan":     "Fast port discovery - cargo install rustscan",
+    "arp-scan":     "Local MAC discovery (root) - apt install arp-scan",
+    "whois":        "WHOIS org lookup - apt install whois",
+    "scapy":        "ARP/ICMP probes - pip3 install scapy",
+    "requests":     "HTTP analysis + ASN/country lookup - pip3 install requests",
+    "dnspython":    "Full DNS enumeration - pip3 install dnspython",
+    "shodan":       "Shodan API enrichment - pip3 install shodan",
+    "cryptography": "SSL cert CN+SAN extraction - pip3 install cryptography",
+    "geoip2":       "MaxMind local GeoIP2 DB (no API, offline) - pip3 install geoip2",
+    "mmh3":         "Camera favicon hash fingerprinting - pip3 install mmh3"
   },
 
   "help": {
@@ -87,6 +90,12 @@
         "description": "Skip active scanning; DNS/WHOIS/Shodan only",
         "type": "boolean",
         "default": false
+      },
+      "max_hosts": {
+        "description": "Max representative IPs sampled for country:/asn: targets",
+        "type": "integer",
+        "default": 1024,
+        "range": "1-65536"
       }
     },
 
@@ -114,6 +123,14 @@
       {
         "description": "Passive intel only (no active probing)",
         "commands": ["use netrecon", "set passive_only true", "set shodan_key KEY", "run 1.2.3.4"]
+      },
+      {
+        "description": "Country-wide recon (German IP space)",
+        "commands": ["use netrecon", "set max_hosts 500", "run country:de"]
+      },
+      {
+        "description": "ASN recon (Google)",
+        "commands": ["use netrecon", "set max_hosts 200", "run asn:AS15169"]
       }
     ],
 
@@ -147,6 +164,7 @@
         "asn_org":       "ASN organization name",
         "country":       "Country code",
         "city":          "City",
+        "ssl_domains":   "CN + SANs from TLS certs (CDN noise filtered)",
         "shodan":        "Shodan host data (ports, vulns, tags)",
         "risk_score":    "0-100 composite risk score",
         "risk_level":    "LOW / MEDIUM / HIGH / CRITICAL",
@@ -199,6 +217,10 @@
       "💡 All engines run concurrently — total time ≈ slowest tool, not sum",
       "💡 ARP scan auto-triggers on private/local network targets",
       "💡 HTTP analysis runs automatically on web ports (80,443,8080,8443...)",
+      "💡 SSL cert domains (CN+SANs) auto-extracted from TLS ports — install cryptography for full SAN support",
+      "💡 country:XX and asn:AS#### targets fetch live CIDRs from ipdeny.com / RIPE stat API",
+      "💡 GeoIP2 local DBs (~/.secv/GeoLite2-*.mmdb) provide offline ASN/country lookup without rate limits",
+      "💡 HTML report (output_dir) now includes SSL domains, ASN/country, risk scores — no xsltproc needed",
       "💡 CVE correlation runs against a built-in database of 60+ CVEs",
       "💡 Risk score is composite: open ports + CVE severity + cleartext protocols",
       "🔒 Always follow responsible disclosure and legal authorization requirements"
@@ -218,7 +240,8 @@
     "shodan_key":    {"type": "string",  "default": "",        "required": false},
     "interface":     {"type": "string",  "default": "",        "required": false},
     "exclude":       {"type": "string",  "default": "",        "required": false},
-    "passive_only":  {"type": "boolean", "default": false,     "required": false}
+    "passive_only":  {"type": "boolean", "default": false,     "required": false},
+    "max_hosts":     {"type": "number",  "default": 1024,      "required": false}
   },
 
   "outputs": {
